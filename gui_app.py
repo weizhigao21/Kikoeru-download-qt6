@@ -204,7 +204,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.downloaded_count_label = ttk.Label(control_frame, text="", font=("Microsoft YaHei UI", 9), foreground=colors["text_secondary"])
         self.downloaded_count_label.pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(control_frame, text="排序:", font=("Microsoft YaHei UI", 10)).pack(side=tk.LEFT, padx=(10, 5))
+        self.hide_dl_btn = ttk.Button(control_frame, text="显示全部", command=self._toggle_hide_downloaded)
+        self.hide_dl_btn.pack(side=tk.LEFT, padx=(10, 5))
+        self._hide_downloaded = False
+
+        self.sort_label = ttk.Label(control_frame, text="排序:", font=("Microsoft YaHei UI", 10))
+        self.sort_label.pack(side=tk.LEFT, padx=(10, 5))
         self.sort_var = tk.StringVar(value="下载时间最新")
         self.sort_combo = ttk.Combobox(control_frame, textvariable=self.sort_var, width=15,
                                         font=("Microsoft YaHei UI", 10), state="readonly")
@@ -319,6 +324,9 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
 
         if new_tab == "downloaded":
             self.show_downloaded = 3
+            self.sort_label.pack(side=tk.LEFT, padx=(10, 5))
+            self.sort_combo.pack(side=tk.LEFT, padx=5)
+            self.hide_dl_btn.pack_forget()
             if self._all_downloaded_works and self._downloaded_cache_valid:
                 self.data_loaded = True
                 self._show_downloaded_page()
@@ -327,7 +335,15 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
                 sort_key = self.sort_map.get(self.sort_var.get(), "download_time_desc")
                 threading.Thread(target=self._load_downloaded_works, args=(sort_key,), daemon=True).start()
         else:
-            self.show_downloaded = 1
+            self.sort_label.pack_forget()
+            self.sort_combo.pack_forget()
+            self.hide_dl_btn.pack(side=tk.LEFT, padx=(10, 5))
+            if self._hide_downloaded:
+                self.show_downloaded = 2
+                self.hide_dl_btn.config(text="隐藏下载")
+            else:
+                self.show_downloaded = 1
+                self.hide_dl_btn.config(text="显示全部")
             self.load_data_async()
 
     def switch_tab(self, tab_name):
@@ -457,6 +473,21 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
                 _config.AI_API_BASE_URL,
                 _config.AI_MODEL
             )
+
+    def _toggle_hide_downloaded(self):
+        if self.current_tab == "downloaded":
+            return
+        self._hide_downloaded = not self._hide_downloaded
+        if self._hide_downloaded:
+            self.show_downloaded = 2
+            self.hide_dl_btn.config(text="隐藏下载")
+        else:
+            self.show_downloaded = 1
+            self.hide_dl_btn.config(text="显示全部")
+        self.current_page = 1
+        self.page_var.set("1")
+        self._bump_generation()
+        self._apply_filter()
 
     def refresh_data(self):
         self.keyword_query = ""
@@ -593,31 +624,27 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
     def update_buttons(self):
         if self.show_downloaded == 3:
             if not self._all_downloaded_works:
-                self.prev_btn.grid_remove()
-                self.next_btn.grid_remove()
+                self.prev_btn.config(state=tk.DISABLED)
+                self.next_btn.config(state=tk.DISABLED)
                 return
             total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
             if self._downloaded_page > 1:
                 self.prev_btn.config(state=tk.NORMAL)
-                self.prev_btn.grid()
             else:
-                self.prev_btn.grid_remove()
+                self.prev_btn.config(state=tk.DISABLED)
             if self._downloaded_page < total_pages:
                 self.next_btn.config(state=tk.NORMAL)
-                self.next_btn.grid()
             else:
-                self.next_btn.grid_remove()
+                self.next_btn.config(state=tk.DISABLED)
             return
         if self.current_page > 1 and self.data_loaded:
             self.prev_btn.config(state=tk.NORMAL)
-            self.prev_btn.grid()
         else:
-            self.prev_btn.grid_remove()
+            self.prev_btn.config(state=tk.DISABLED)
         if self.data_loaded:
             self.next_btn.config(state=tk.NORMAL)
-            self.next_btn.grid()
         else:
-            self.next_btn.grid_remove()
+            self.next_btn.config(state=tk.DISABLED)
 
     def _on_mouse_wheel(self, event):
         scroll_units = int(-1 * (event.delta / 120))
