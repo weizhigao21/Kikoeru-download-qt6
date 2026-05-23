@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 图片缓存
+image_cache/
+
+# 构建产物
+build/
+dist/
+*.spec
+
+# Aria2会话
+aria2/aria2.session
+
+# 设置文件
+settings/
+
+# 日志
+*.log
+
+# IDE
+.vscode/
+.idea/

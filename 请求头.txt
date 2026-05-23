@@ -1,0 +1,75 @@
+:authority
+api.asmr-200.com
+:method
+GET
+:path
+/api/search/%20%24tag%3A%E5%82%AC%E7%9C%A0%E9%9F%B3%E5%A3%B0%24?order=create_date&sort=desc&page=1&pageSize=20&subtitle=0&includeTranslationWorks=true&withPlaylistStatus[]=b0364f73-a237-45cf-bd31-2bfb6ef390b5
+:scheme
+https
+accept
+application/json, text/plain, */*
+accept-encoding
+gzip, deflate, br, zstd
+accept-language
+zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6
+authorization
+Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2FzbXIub25lIiwic3ViIjoi5oiR5ZCD5p-g5qqsMiIsImF1ZCI6Imh0dHBzOi8vYXNtci5vbmUvYXBpIiwibmFtZSI6IuaIkeWQg-afoOaqrDIiLCJncm91cCI6InVzZXIiLCJpYXQiOjE3Njg3OTE0NDIsImV4cCI6MTgwMDMyNzQ0Mn0.rC3KFgZzPDrU-V3oubYHmgK-sYqhoGoxnT7Z-heTGJY
+if-none-match
+W/"16a60-YuKYRKJD9ZmQT1T2+4vxrWz5lKU"
+origin
+https://www.asmr.one
+priority
+u=1, i
+referer
+https://www.asmr.one/
+sec-ch-ua
+"Not:A-Brand";v="99", "Microsoft Edge";v="145", "Chromium";v="145"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"Windows"
+sec-fetch-dest
+empty
+sec-fetch-mode
+cors
+sec-fetch-site
+cross-site
+user-agent
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0
+
+:authority
+api.asmr-200.com
+:method
+GET
+:path
+/api/search/%20%24tag%3A%E5%86%85%E5%B0%84%2F%E4%B8%AD%E5%87%BA%24?order=create_date&sort=desc&page=1&pageSize=20&subtitle=0&includeTranslationWorks=true&withPlaylistStatus[]=b0364f73-a237-45cf-bd31-2bfb6ef390b5
+:scheme
+https
+accept
+application/json, text/plain, */*
+accept-encoding
+gzip, deflate, br, zstd
+accept-language
+zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6
+authorization
+Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2FzbXIub25lIiwic3ViIjoi5oiR5ZCD5p-g5qqsMiIsImF1ZCI6Imh0dHBzOi8vYXNtci5vbmUvYXBpIiwibmFtZSI6IuaIkeWQg-afoOaqrDIiLCJncm91cCI6InVzZXIiLCJpYXQiOjE3Njg3OTE0NDIsImV4cCI6MTgwMDMyNzQ0Mn0.rC3KFgZzPDrU-V3oubYHmgK-sYqhoGoxnT7Z-heTGJY
+origin
+https://www.asmr.one
+priority
+u=1, i
+referer
+https://www.asmr.one/
+sec-ch-ua
+"Not:A-Brand";v="99", "Microsoft Edge";v="145", "Chromium";v="145"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"Windows"
+sec-fetch-dest
+empty
+sec-fetch-mode
+cors
+sec-fetch-site
+cross-site
+user-agent
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0
