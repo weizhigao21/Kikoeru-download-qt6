@@ -63,6 +63,12 @@ class DownloadManager:
         self._max_concurrent = 1
         self._queue_mode = False
 
+        # 内存管理配置
+        self._MAX_COMPLETED_TASKS = 100  # 保留最近100条已完成任务用于显示
+        self._MAX_TOTAL_TASKS = 200     # 任务总数上限
+        self._cleanup_counter = 0       # 清理计数器（每10次轮询清理一次）
+        self._last_cleanup_time = time.time()
+
     def set_download_history(self, dh):
         self.download_history = dh
 
@@ -354,6 +360,13 @@ class DownloadManager:
             if changed:
                 self._notify_observers()
 
+            # 定期清理已完成任务（每10次轮询或超过5分钟）
+            self._cleanup_counter += 1
+            if self._cleanup_counter >= 10 or (time.time() - self._last_cleanup_time > 300):
+                self._cleanup_completed_tasks()
+                self._cleanup_counter = 0
+                self._last_cleanup_time = time.time()
+
             with self._tasks_lock:
                 any_active = any(
                     t.status in (TaskStatus.DOWNLOADING, TaskStatus.SUBMITTING)
@@ -603,6 +616,29 @@ class DownloadManager:
 
     def is_queue_mode(self) -> bool:
         return self._queue_mode
+
+    def _cleanup_completed_tasks(self):
+        with self._tasks_lock:
+            total_tasks = len(self.tasks)
+            if total_tasks <= self._MAX_TOTAL_TASKS:
+                return
+
+            # 分离已完成/失败/取消的任务
+            completed_tasks = [
+                (k, v) for k, v in self.tasks.items()
+                if v.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+            ]
+
+            # 按完成时间排序（保留最近的）
+            completed_tasks.sort(key=lambda x: x[1].completed_at or 0, reverse=True)
+
+            # 超过限制的部分删除
+            tasks_to_remove = completed_tasks[self._MAX_COMPLETED_TASKS:]
+            for work_id, _ in tasks_to_remove:
+                del self.tasks[work_id]
+
+            if tasks_to_remove:
+                print(f"[内存管理] 清理 {len(tasks_to_remove)} 个旧任务，当前任务数: {len(self.tasks)}")
 
     def add_observer(self, callback: Callable):
         self._observers.append(callback)

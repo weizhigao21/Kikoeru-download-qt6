@@ -79,6 +79,8 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.current_tags = []
         self.keyword_query = ""
         self.circle_query = ""
+        self.search_history = [{"type": "recommend", "page": 1}]
+        self.current_search_index = 0
         self.sort_map = {
             "下载时间最新": "download_time_desc",
             "下载时间最旧": "download_time_asc",
@@ -185,6 +187,9 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.tab_combo['values'] = ("推荐作品", "最新收录", "下载作品")
         self.tab_combo.pack(side=tk.LEFT)
         self.tab_combo.bind("<<ComboboxSelected>>", self._on_tab_changed)
+
+        self.back_btn = ttk.Button(control_frame, text="← 返回", command=self.go_back_search, state=tk.DISABLED)
+        self.back_btn.pack(side=tk.LEFT, padx=(10, 5))
 
         self.refresh_btn = ttk.Button(control_frame, text="刷新", command=self.refresh_data)
         self.refresh_btn.pack(side=tk.LEFT, padx=(20, 5))
@@ -317,9 +322,6 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.current_page = 1
         self.page_var.set("1")
         self._load_downloaded_ids()
-        self.keyword_query = ""
-        self.current_tags = []
-        self.circle_query = ""
         self._bump_generation()
 
         if new_tab == "downloaded":
@@ -327,7 +329,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
             self.sort_label.pack(side=tk.LEFT, padx=(10, 5))
             self.sort_combo.pack(side=tk.LEFT, padx=5)
             self.hide_dl_btn.pack_forget()
-            if self._all_downloaded_works and self._downloaded_cache_valid:
+            self.clear_search_history()
+            if self.current_tags or self.circle_query or self.keyword_query:
+                self.current_page = 1
+                self.page_var.set("1")
+                self._search_in_downloaded_works()
+            elif self._all_downloaded_works and self._downloaded_cache_valid:
                 self.data_loaded = True
                 self._show_downloaded_page()
             else:
@@ -344,7 +351,23 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
             else:
                 self.show_downloaded = 1
                 self.hide_dl_btn.config(text="显示全部")
-            self.load_data_async()
+            
+            if self.current_tags:
+                self._search_by_tag(1)
+            elif self.circle_query:
+                self.status_label.config(text=f"正在搜索厂商: {self.circle_query} (第1页)...")
+                self.loading = True
+                gen = self._nav_generation
+                self.show_loading()
+                threading.Thread(target=self._search_by_circle_async, args=(1, gen), daemon=True).start()
+            elif self.keyword_query:
+                self.status_label.config(text=f"正在搜索: {self.keyword_query} (第1页)...")
+                self.loading = True
+                gen = self._nav_generation
+                self.show_loading()
+                threading.Thread(target=self._search_by_keyword_async, args=(1, gen), daemon=True).start()
+            else:
+                self.load_data_async()
 
     def switch_tab(self, tab_name):
         pass
@@ -440,17 +463,33 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.status_label.config(text=f"✓ 数据加载完成 (第{self.current_page}页)" if from_cache else f"↓ 从网络获取 (第{self.current_page}页)")
 
         if self.works:
-            logger.debug("_on_data_loaded >> display_works_list")
-            self.display_works_list()
-            logger.debug("_on_data_loaded >> show_work_detail(0)")
-            self.show_work_detail(0)
-            logger.debug("_on_data_loaded >> update_buttons")
-            self.update_buttons()
+            logger.debug("_on_data_loaded >> 批量UI更新")
+            self._batch_ui_update()
             logger.debug("_on_data_loaded 完成")
         else:
             self.display_empty_state()
             self.update_buttons()
             messagebox.showinfo("提示", "当前页没有数据")
+
+    def _batch_ui_update(self):
+        """批量UI更新，减少重绘次数"""
+        # 1. 先隐藏加载状态
+        self.hide_loading()
+        self.refresh_btn.config(state=tk.NORMAL)
+
+        # 2. 批量更新列表和详情（禁用重绘）
+        self.canvas.config(cursor="watch")
+        self.root.config(cursor="watch")
+
+        try:
+            self.display_works_list()
+            self.show_work_detail(0)
+        finally:
+            self.cursor = ""
+            self.root.config(cursor="")
+
+        # 3. 最后更新按钮状态
+        self.update_buttons()
 
     def _on_error(self, msg: str):
         self.hide_loading()
@@ -489,10 +528,79 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self._bump_generation()
         self._apply_filter()
 
+    def _push_search_history(self, state):
+        self.search_history = self.search_history[:self.current_search_index + 1]
+        self.search_history.append(state)
+        self.current_search_index = len(self.search_history) - 1
+        self._update_back_button()
+
+    def _update_back_button(self):
+        if self.current_search_index > 0:
+            self.back_btn.config(state=tk.NORMAL)
+        else:
+            self.back_btn.config(state=tk.DISABLED)
+
+    def go_back_search(self):
+        if self.current_search_index <= 0:
+            return
+        self.current_search_index -= 1
+        state = self.search_history[self.current_search_index]
+        self._restore_search_state(state)
+
+    def _restore_search_state(self, state):
+        search_type = state.get("type", "recommend")
+        
+        if search_type == "recommend":
+            self.current_tags = []
+            self.keyword_query = ""
+            self.circle_query = ""
+            self.current_page = state.get("page", 1)
+            self.page_var.set(str(self.current_page))
+            self._show_search_entry()
+            self.load_data_async()
+        elif search_type == "tag":
+            self.current_tags = state.get("tags", [])
+            self.keyword_query = ""
+            self.circle_query = ""
+            self.current_page = state.get("page", 1)
+            self.page_var.set(str(self.current_page))
+            self._search_by_tag(self.current_page)
+        elif search_type == "keyword":
+            self.keyword_query = state.get("keyword", "")
+            self.current_tags = []
+            self.circle_query = ""
+            self.current_page = state.get("page", 1)
+            self.page_var.set(str(self.current_page))
+            self._update_keyword_search_display()
+            self.status_label.config(text=f"正在搜索: {self.keyword_query} (第{self.current_page}页)...")
+            self.loading = True
+            gen = self._nav_generation
+            self.show_loading()
+            threading.Thread(target=self._search_by_keyword_async, args=(self.current_page, gen), daemon=True).start()
+        elif search_type == "circle":
+            self.circle_query = state.get("circle", "")
+            self.current_tags = []
+            self.keyword_query = ""
+            self.current_page = state.get("page", 1)
+            self.page_var.set(str(self.current_page))
+            self._update_circle_search_display()
+            self.status_label.config(text=f"正在搜索厂商: {self.circle_query} (第{self.current_page}页)...")
+            self.loading = True
+            gen = self._nav_generation
+            self.show_loading()
+            threading.Thread(target=self._search_by_circle_async, args=(self.current_page, gen), daemon=True).start()
+
+    def clear_search_history(self):
+        self.search_history = [{"type": "recommend", "page": 1}]
+        self.current_search_index = 0
+        self._update_back_button()
+
     def refresh_data(self):
         self.keyword_query = ""
         self.current_tags = []
+        self.circle_query = ""
         self._fetched_ids.clear()
+        self.clear_search_history()
         self.load_data_async()
 
     def go_to_page(self):
@@ -506,13 +614,18 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
             if page < 1:
                 page = 1
             if self.show_downloaded == 3:
-                if not self._all_downloaded_works:
-                    return
-                total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
-                page = min(page, total_pages)
-                self._downloaded_page = page
-                self.page_var.set(str(page))
-                self._show_downloaded_page()
+                if self.current_tags or self.keyword_query or self.circle_query:
+                    self._downloaded_page = page
+                    self.page_var.set(str(page))
+                    self._show_searched_downloaded_page()
+                else:
+                    if not self._all_downloaded_works:
+                        return
+                    total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+                    page = min(page, total_pages)
+                    self._downloaded_page = page
+                    self.page_var.set(str(page))
+                    self._show_downloaded_page()
                 return
             self.current_page = page
             self.page_var.set(str(page))
@@ -549,7 +662,10 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
             self._nav_debounce_id = self.root.after(300, self._clear_nav_debounce)
             self._downloaded_page -= 1
             self.page_var.set(str(self._downloaded_page))
-            self._show_downloaded_page()
+            if self.current_tags or self.keyword_query or self.circle_query:
+                self._show_searched_downloaded_page()
+            else:
+                self._show_downloaded_page()
             return
         if self.current_page <= 1:
             return
@@ -581,15 +697,23 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         if self.show_downloaded == 3:
             if not self._all_downloaded_works:
                 return
-            total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
-            if self._downloaded_page >= total_pages:
-                return
+            if self.current_tags or self.keyword_query or self.circle_query:
+                total_pages = max(1, (len(self.works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+                if self._downloaded_page >= total_pages:
+                    return
+            else:
+                total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+                if self._downloaded_page >= total_pages:
+                    return
             if self._nav_debounce_id:
                 return
             self._nav_debounce_id = self.root.after(300, self._clear_nav_debounce)
             self._downloaded_page += 1
             self.page_var.set(str(self._downloaded_page))
-            self._show_downloaded_page()
+            if self.current_tags or self.keyword_query or self.circle_query:
+                self._show_searched_downloaded_page()
+            else:
+                self._show_downloaded_page()
             return
         if self._nav_debounce_id:
             return
@@ -627,7 +751,10 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
                 self.prev_btn.config(state=tk.DISABLED)
                 self.next_btn.config(state=tk.DISABLED)
                 return
-            total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+            if self.current_tags or self.keyword_query or self.circle_query:
+                total_pages = max(1, (len(self.works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+            else:
+                total_pages = max(1, (len(self._all_downloaded_works) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
             if self._downloaded_page > 1:
                 self.prev_btn.config(state=tk.NORMAL)
             else:

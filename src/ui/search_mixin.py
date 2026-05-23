@@ -14,25 +14,40 @@ class SearchMixin:
 
     def _search_by_tag(self, tag_or_page, page=None):
         self.keyword_query = ""
+        self.circle_query = ""
         if isinstance(tag_or_page, str):
             tag = tag_or_page
             if page is None:
                 page = 1
             if tag not in self.current_tags:
                 self.current_tags.append(tag)
+                is_new_search = True
+            else:
+                is_new_search = False
         else:
             page = tag_or_page
+            is_new_search = False
             if not self.current_tags:
                 return
         if not self.current_tags:
             return
+        
         self._update_tag_search_display()
         self.current_page = page
         self.page_var.set(str(page))
+        
+        if hasattr(self, 'current_tab') and self.current_tab == "downloaded":
+            if is_new_search:
+                self._push_search_history({"type": "tag", "tags": self.current_tags.copy(), "page": page})
+            self._search_in_downloaded_works()
+            return
+        
         self.status_label.config(text=f"正在搜索标签: {' + '.join(self.current_tags)} (第{page}页)...")
         self.loading = True
         self._bump_generation()
         gen = self._nav_generation
+        if is_new_search:
+            self._push_search_history({"type": "tag", "tags": self.current_tags.copy(), "page": page})
         self.show_loading()
         threading.Thread(target=self._search_by_tag_async, args=(page, gen), daemon=True).start()
 
@@ -144,6 +159,15 @@ class SearchMixin:
             self.current_page = 1
             self.page_var.set("1")
             self.current_tags = []
+            self.circle_query = ""
+            
+            if hasattr(self, 'current_tab') and self.current_tab == "downloaded":
+                self._push_search_history({"type": "keyword", "keyword": text, "page": 1})
+                self._update_keyword_search_display()
+                self._search_in_downloaded_works()
+                return
+            
+            self._push_search_history({"type": "keyword", "keyword": text, "page": 1})
             self._update_keyword_search_display()
             self.status_label.config(text=f"正在搜索: {text} (第1页)...")
             self.loading = True
@@ -226,6 +250,14 @@ class SearchMixin:
         self.circle_query = circle_name
         self.current_page = 1
         self.page_var.set("1")
+        
+        if hasattr(self, 'current_tab') and self.current_tab == "downloaded":
+            self._push_search_history({"type": "circle", "circle": circle_name, "page": 1})
+            self._update_circle_search_display()
+            self._search_in_downloaded_works()
+            return
+        
+        self._push_search_history({"type": "circle", "circle": circle_name, "page": 1})
         self._update_circle_search_display()
         self.status_label.config(text=f"正在搜索厂商: {circle_name} (第1页)...")
         self.loading = True

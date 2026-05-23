@@ -1,6 +1,7 @@
 import os
 import hashlib
 import threading
+import time
 import requests
 import logging
 from PIL import Image, ImageTk
@@ -8,7 +9,7 @@ from collections import OrderedDict
 
 logger = logging.getLogger('cache')
 
-_thread_local = threading.local()
+_thread_local = threading.local
 
 
 def get_http_session():
@@ -24,23 +25,30 @@ class LRUCache:
     def __init__(self, capacity=100):
         self.capacity = capacity
         self.cache = OrderedDict()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
+        self._stats = {"hits": 0, "misses": 0, "skips": 0}
 
     def get(self, key):
         logger.debug("LRU.get key=%s", key[:50] if key else "")
-        if self.lock.acquire(blocking=False):
+        acquired = self.lock.acquire(timeout=0.01)  # 10ms超时
+        if acquired:
             try:
                 if key in self.cache:
                     self.cache.move_to_end(key)
+                    self._stats["hits"] += 1
                     return self.cache[key]
+                self._stats["misses"] += 1
                 return None
             finally:
                 self.lock.release()
-        logger.debug("LRU.get 锁被占用，跳过")
-        return None
+        else:
+            self._stats["skips"] += 1
+            logger.debug("LRU.get 锁超时，跳过 (key=%s)", key[:30] if key else "")
+            return None
 
     def put(self, key, value):
-        if self.lock.acquire(blocking=False):
+        acquired = self.lock.acquire(timeout=0.02)  # 20ms超时（写入可以稍长）
+        if acquired:
             try:
                 if key in self.cache:
                     self.cache.move_to_end(key)
@@ -51,12 +59,30 @@ class LRUCache:
                 self.lock.release()
 
     def remove(self, key):
-        if self.lock.acquire(blocking=False):
+        acquired = self.lock.acquire(timeout=0.01)
+        if acquired:
             try:
                 if key in self.cache:
                     del self.cache[key]
             finally:
                 self.lock.release()
+
+    def get_stats(self):
+        total = self._stats["hits"] + self._stats["misses"] + self._stats["skips"]
+        if total == 0:
+            return {"hit_rate": 0, "total_lookups": 0}
+        hit_rate = self._stats["hits"] / (self._stats["hits"] + self._stats["misses"]) * 100
+        return {
+            "hit_rate": round(hit_rate, 1),
+            "total_lookups": total,
+            "hits": self._stats["hits"],
+            "misses": self._stats["misses"],
+            "skips": self._stats["skips"]
+        }
+
+    def clear_stats(self):
+        with self.lock:
+            self._stats = {"hits": 0, "misses": 0, "skips": 0}
 
 
 class ImageCacheManager:
@@ -67,6 +93,8 @@ class ImageCacheManager:
         self._thumbnail_size = (180, 180)
         self.max_disk_bytes = max_disk_mb * 1024 * 1024
         self._cleanup_lock = threading.Lock()
+        self._preload_queue = set()  # 预加载队列
+        self._preloading = False    # 预加载进行中标志
 
     def _get_cache_path(self, url):
         url_hash = hashlib.md5(url.encode()).hexdigest()
@@ -241,13 +269,63 @@ class ImageCacheManager:
 
     def clear_memory_cache(self):
         self.memory_cache.cache.clear()
+        self.memory_cache.clear_stats()
 
     def get_stats(self):
+        import os
+        disk_size = 0
+        if os.path.exists(self.cache_dir):
+            for f in os.listdir(self.cache_dir):
+                try:
+                    disk_size += os.path.getsize(os.path.join(self.cache_dir, f))
+                except Exception:
+                    pass
+
         return {
             "memory_count": len(self.memory_cache.cache),
             "memory_capacity": self.memory_cache.capacity,
-            "disk_path": self.cache_dir
+            "disk_path": self.cache_dir,
+            "disk_size_mb": round(disk_size / (1024 * 1024), 2),
+            **self.memory_cache.get_stats()
         }
+
+    def preload_thumbnails(self, urls, current_index=0):
+        """智能预加载缩略图（前后各3张）"""
+        if not urls or self._preloading:
+            return
+
+        # 计算需要预加载的范围
+        preload_range = 3
+        start = max(0, current_index - preload_range)
+        end = min(len(urls), current_index + preload_range + 1)
+
+        urls_to_preload = [u for u in urls[start:end] if u]
+        self._preload_queue.update(urls_to_preload)
+
+        if not self._preloading:
+            self._preloading = True
+            threading.Thread(target=self._preload_worker, daemon=True).start()
+
+    def _preload_worker(self):
+        """后台预加载工作线程"""
+        try:
+            while self._preload_queue:
+                url = self._preload_queue.pop()
+                if not url:
+                    continue
+
+                # 检查是否已在缓存中
+                cache_key = f"thumb_{url}"
+                if self.memory_cache.get(cache_key):
+                    continue
+
+                # 尝试从磁盘加载或下载
+                self.get_thumbnail(url)
+
+                # 短暂休眠，避免占用过多资源
+                time.sleep(0.05)
+        finally:
+            self._preloading = False
 
     def _schedule_disk_cleanup(self):
         if self._cleanup_lock.acquire(blocking=False):

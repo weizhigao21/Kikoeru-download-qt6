@@ -1,30 +1,62 @@
 import sqlite3
 import json
 import threading
+import time
 from contextlib import contextmanager
+
+_CONNECTION_TIMEOUT = 300  # 5分钟未使用自动关闭连接
 
 
 class DatabaseManager:
     def __init__(self, db_path):
         self.db_path = db_path
         self._local = threading.local()
+        self._lock = threading.Lock()
         self._init_db()
 
     @contextmanager
     def _connect(self):
         conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = sqlite3.connect(self.db_path)
+        last_used = getattr(self._local, 'last_used', 0)
+
+        if conn is None or (time.time() - last_used > _CONNECTION_TIMEOUT):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-4096")  # 4MB缓存
             self._local.conn = conn
+
+        self._local.last_used = time.time()
+        
         try:
             yield conn
+            conn.commit()
         except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             try:
                 conn.close()
             except Exception:
                 pass
             self._local.conn = None
             raise
+
+    def close_all(self):
+        with self._lock:
+            conn = getattr(self._local, 'conn', None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._local.conn = None
 
     def _init_db(self):
         with self._connect() as conn:
@@ -93,30 +125,40 @@ class DatabaseManager:
 
             conn.commit()
 
+    @staticmethod
+    def _safe_json_load(s, default=None):
+        if not s:
+            return default if default is not None else ([] if default == [] else {})
+        try:
+            data = json.loads(s)
+            return data if isinstance(data, (list, dict)) else (default or [])
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else []
+
     def get_works_by_page(self, page: int) -> list:
         with self._connect() as conn:
-            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            cursor.execute("SELECT * FROM works WHERE page = ? AND hidden = 0 ORDER BY id", (page,))
+            # 明确指定列名，避免 SELECT * 和运行时检查
+            cursor.execute("""
+                SELECT work_id, title, source_id, thumbnail_url, main_cover_url,
+                       tags, vas, circle_data, other_editions
+                FROM works WHERE page = ? AND hidden = 0 ORDER BY id
+            """, (page,))
             rows = cursor.fetchall()
 
             works = []
             for row in rows:
-                thumbnail_url = row["thumbnail_url"] if "thumbnail_url" in row.keys() else ""
-                main_cover_url = row["main_cover_url"] if "main_cover_url" in row.keys() else ""
-                vas_str = row["vas"] if "vas" in row.keys() else ""
-                circle_str = row["circle_data"] if "circle_data" in row.keys() else ""
                 work = {
-                    "id": row["work_id"],
-                    "title": row["title"],
-                    "source_id": row["source_id"],
-                    "thumbnailCoverUrl": thumbnail_url,
-                    "mainCoverUrl": main_cover_url,
-                    "tags": json.loads(row["tags"]) if row["tags"] else [],
-                    "vas": json.loads(vas_str) if vas_str else [],
-                    "circle": json.loads(circle_str) if circle_str else {},
-                    "other_language_editions_in_db": json.loads(row["other_editions"]) if row["other_editions"] else []
+                    "id": row[0],
+                    "title": row[1] or "",
+                    "source_id": row[2] or "",
+                    "thumbnailCoverUrl": row[3] or "",
+                    "mainCoverUrl": row[4] or "",
+                    "tags": self._safe_json_load(row[5], []),
+                    "vas": self._safe_json_load(row[6], []),
+                    "circle": self._safe_json_load(row[7], {}),
+                    "other_language_editions_in_db": self._safe_json_load(row[8], [])
                 }
                 works.append(work)
             return works
@@ -199,23 +241,52 @@ class DownloadHistoryManager:
     def __init__(self, db_path):
         self.db_path = db_path
         self._local = threading.local()
+        self._lock = threading.Lock()
         self._init_db()
 
     @contextmanager
     def _connect(self):
         conn = getattr(self._local, 'conn', None)
-        if conn is None:
-            conn = sqlite3.connect(self.db_path)
+        last_used = getattr(self._local, 'last_used', 0)
+
+        if conn is None or (time.time() - last_used > _CONNECTION_TIMEOUT):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-4096")
             self._local.conn = conn
+
+        self._local.last_used = time.time()
+
         try:
             yield conn
+            conn.commit()
         except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             try:
                 conn.close()
             except Exception:
                 pass
             self._local.conn = None
             raise
+
+    def close_all(self):
+        with self._lock:
+            conn = getattr(self._local, 'conn', None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._local.conn = None
 
     def _init_db(self):
         with self._connect() as conn:
@@ -298,32 +369,34 @@ class DownloadHistoryManager:
             "id_asc": "rj_id ASC",
             "id_desc": "rj_id DESC"
         }
-        order_by = order_map.get(sort, "created_at DESC")
+        # 安全验证：只允许预定义的排序方式
+        if sort not in order_map:
+            sort = "download_time_desc"
+        order_by = order_map[sort]
 
         with self._connect() as conn:
-            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM download_history ORDER BY {order_by}")
+
+            # 明确指定列名，避免 SELECT *
+            cursor.execute(f"""
+                SELECT rj_id, title, tags, thumbnail_url, main_cover_url,
+                       vas, circle_data, other_editions
+                FROM download_history ORDER BY {order_by}
+            """)
             rows = cursor.fetchall()
 
             works = []
             for row in rows:
-                thumbnail_url = row["thumbnail_url"] if "thumbnail_url" in row.keys() else ""
-                main_cover_url = row["main_cover_url"] if "main_cover_url" in row.keys() else ""
-                vas_str = row["vas"] if "vas" in row.keys() else ""
-                circle_str = row["circle_data"] if "circle_data" in row.keys() else ""
-                other_editions_str = row["other_editions"] if "other_editions" in row.keys() else ""
-
                 work = {
-                    "id": row["rj_id"],
-                    "title": row["title"],
-                    "source_id": row["rj_id"],
-                    "thumbnailCoverUrl": thumbnail_url or "",
-                    "mainCoverUrl": main_cover_url or "",
-                    "tags": [{"i18n": {"zh-cn": {"name": tag}}} for tag in (row["tags"] or "").split(",") if tag],
-                    "vas": json.loads(vas_str) if vas_str else [],
-                    "circle": json.loads(circle_str) if circle_str else {},
-                    "other_language_editions_in_db": json.loads(other_editions_str) if other_editions_str else []
+                    "id": row[0] or "",
+                    "title": row[1] or "",
+                    "source_id": row[0] or "",
+                    "thumbnailCoverUrl": row[3] or "",
+                    "mainCoverUrl": row[4] or "",
+                    "tags": [{"i18n": {"zh-cn": {"name": tag}}} for tag in (row[2] or "").split(",") if tag],
+                    "vas": self._safe_json_load(row[5], []),
+                    "circle": self._safe_json_load(row[6], {}),
+                    "other_language_editions_in_db": self._safe_json_load(row[7], [])
                 }
                 works.append(work)
             return works

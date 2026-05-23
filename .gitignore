@@ -3,24 +3,54 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.egg-info/
+dist/
+build/
+eggs/
 
 # 图片缓存
 image_cache/
 
-# 构建产物
-build/
-dist/
-*.spec
+# 下载文件（用户数据，体积大）
+downloads/
+
+# 数据库文件（用户数据）
+settings/*.db
 
 # Aria2会话
 aria2/aria2.session
+aria2/dht.dat*
+aria2/cache/
 
-# 设置文件
-settings/
+# 设置和配置（含敏感信息）
+settings/config.json
+!settings/.gitkeep
 
 # 日志
 *.log
+logs/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 备份文件
+*.bak
+*.backup
+*.orig
+
+# 环境变量
+.env
+.env.local
+
+# 打包产物
+*.spec
+*.exe

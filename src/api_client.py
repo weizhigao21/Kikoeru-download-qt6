@@ -334,8 +334,8 @@ def search_by_circle(circle_name, page: int = 1, page_size: int = WORKS_PER_PAGE
 
 def _encode_tags(tags):
     if isinstance(tags, list):
-        return requests.utils.quote(" ".join(tags))
-    return requests.utils.quote(str(tags))
+        return requests.utils.quote(" ".join(tags), safe='')
+    return requests.utils.quote(str(tags), safe='')
 
 
 def clear_api_cache():

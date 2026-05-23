@@ -220,3 +220,79 @@ class FilterMixin:
         self.display_empty_state()
         self.show_work_detail(-1)
         self.update_buttons()
+
+    def _search_in_downloaded_works(self):
+        if not self._all_downloaded_works:
+            self.status_label.config(text="暂无已下载作品")
+            self.works = []
+            self.display_empty_state()
+            self.show_work_detail(-1)
+            self.update_buttons()
+            return
+
+        filtered = []
+        for work in self._all_downloaded_works:
+            match = True
+            title = work.get("title", "").lower()
+            source_id = work.get("source_id", "")
+            
+            if self.current_tags:
+                work_tags = []
+                for tag in work.get("tags", []):
+                    if isinstance(tag, dict) and tag.get("i18n", {}).get("zh-cn", {}).get("name"):
+                        work_tags.append(tag["i18n"]["zh-cn"]["name"].lower())
+                    elif isinstance(tag, str):
+                        work_tags.append(tag.lower())
+                for search_tag in self.current_tags:
+                    if search_tag.lower() not in work_tags:
+                        match = False
+                        break
+            
+            if self.keyword_query and match:
+                if self.keyword_query.lower() not in title and self.keyword_query.lower() not in source_id.lower():
+                    match = False
+            
+            if self.circle_query and match:
+                circle = work.get("circle", {})
+                circle_name = circle.get("name", "").lower() if isinstance(circle, dict) else ""
+                if self.circle_query.lower() not in circle_name:
+                    match = False
+            
+            if match:
+                filtered.append(work)
+
+        self.works = filtered
+        self.all_works = filtered.copy()
+        self.original_works = filtered.copy()
+        self.current_work_index = -1
+        self.data_loaded = True
+        self.max_page = max(1, (len(filtered) + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
+
+        if self.current_tags:
+            search_desc = f"标签「{' + '.join(self.current_tags)}」"
+        elif self.keyword_query:
+            search_desc = f"关键词「{self.keyword_query}」"
+        elif self.circle_query:
+            search_desc = f"厂商「{self.circle_query}」"
+        else:
+            search_desc = ""
+
+        self.status_label.config(text=f"已下载作品中搜索{search_desc}: {len(filtered)} 个作品")
+        
+        if filtered:
+            self.display_works_list()
+            self.show_work_detail(0)
+        else:
+            self.display_empty_state()
+            self.show_work_detail(-1)
+        self.update_buttons()
+
+    def _show_searched_downloaded_page(self):
+        start = (self._downloaded_page - 1) * self.PAGE_SIZE
+        end = start + self.PAGE_SIZE
+        page_works = self.works[start:end]
+        self.current_work_index = -1
+        self.data_loaded = True
+        self.display_works_list()
+        self.show_work_detail(0)
+        self.update_buttons()
