@@ -72,16 +72,29 @@ class SearchMixin:
                 return
             self.root.after(0, self._on_error, f"标签搜索失败: {str(e)}")
 
+    def _display_works_with_filter(self):
+        if self.show_downloaded == 2:
+            self.works = [w for w in self.works
+                          if self._normalize_rj_id(w.get('source_id', '')) not in self.downloaded_ids_cache]
+            self.original_works = self.works.copy()
+        self.display_works_list()
+        self.show_work_detail(0)
+        self.update_buttons()
+
     def _on_tag_search_success(self):
         self.hide_loading()
         self.refresh_btn.config(state=tk.NORMAL)
         self._update_tag_search_display()
         tags_str = " + ".join(self.current_tags)
-        self.status_label.config(text=f"标签「{tags_str}」搜索结果 (共 {len(self.works)} 个作品)")
+        total = len(self.works)
+        if self.show_downloaded == 2:
+            visible = sum(1 for w in self.works
+                          if self._normalize_rj_id(w.get('source_id', '')) not in self.downloaded_ids_cache)
+            self.status_label.config(text=f"标签「{tags_str}」搜索结果 (共 {total} 个，隐藏已下载后 {visible} 个)")
+        else:
+            self.status_label.config(text=f"标签「{tags_str}」搜索结果 (共 {total} 个作品)")
         if self.works:
-            self.display_works_list()
-            self.show_work_detail(0)
-            self.update_buttons()
+            self._display_works_with_filter()
         else:
             self.display_empty_state()
             self.update_buttons()
@@ -197,11 +210,15 @@ class SearchMixin:
         self.hide_loading()
         self.refresh_btn.config(state=tk.NORMAL)
         self._update_keyword_search_display()
-        self.status_label.config(text=f"关键词「{self.keyword_query}」搜索结果 (共 {len(self.works)} 个作品)")
+        total = len(self.works)
+        if self.show_downloaded == 2:
+            visible = sum(1 for w in self.works
+                          if self._normalize_rj_id(w.get('source_id', '')) not in self.downloaded_ids_cache)
+            self.status_label.config(text=f"关键词「{self.keyword_query}」搜索结果 (共 {total} 个，隐藏已下载后 {visible} 个)")
+        else:
+            self.status_label.config(text=f"关键词「{self.keyword_query}」搜索结果 (共 {total} 个作品)")
         if self.works:
-            self.display_works_list()
-            self.show_work_detail(0)
-            self.update_buttons()
+            self._display_works_with_filter()
         else:
             self.display_empty_state()
             self.update_buttons()
@@ -289,11 +306,15 @@ class SearchMixin:
         self.hide_loading()
         self.refresh_btn.config(state=tk.NORMAL)
         self._update_circle_search_display()
-        self.status_label.config(text=f"厂商「{self.circle_query}」搜索结果 (共 {len(self.works)} 个作品)")
+        total = len(self.works)
+        if self.show_downloaded == 2:
+            visible = sum(1 for w in self.works
+                          if self._normalize_rj_id(w.get('source_id', '')) not in self.downloaded_ids_cache)
+            self.status_label.config(text=f"厂商「{self.circle_query}」搜索结果 (共 {total} 个，隐藏已下载后 {visible} 个)")
+        else:
+            self.status_label.config(text=f"厂商「{self.circle_query}」搜索结果 (共 {total} 个作品)")
         if self.works:
-            self.display_works_list()
-            self.show_work_detail(0)
-            self.update_buttons()
+            self._display_works_with_filter()
         else:
             self.display_empty_state()
             self.update_buttons()

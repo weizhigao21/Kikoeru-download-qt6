@@ -1,5 +1,15 @@
 # 更新日志
 
+## v1.35.0
+- **重构**：代码模块拆分 — 所有模块文件控制在 400 行以内，提升可维护性和可读性
+  - `gui_app.py`（891行 → 167行）：拆分为 4 个文件 — `gui_app.py`（主入口 + 工具方法）、`gui_app_ui.py`（`UISetupMixin` 样式/UI构建）、`gui_app_nav.py`（`NavigationMixin` 数据加载/分页导航）、`gui_app_events.py`（`EventMixin` 搜索历史/快捷键/鼠标事件）
+  - `src/download/manager.py`（705行 → 253行）：拆分为 4 个文件 — `models.py`（`TaskStatus`/`DownloadTask` 数据模型）、`manager.py`（`DownloadManager` 主类）、`manager_core.py`（`DownloadCoreMixin` 下载提交/持久化/队列）、`manager_poll.py`（`DownloadPollMixin` 轮询进度/重试/低速检测）
+  - `src/database/database.py`（569行 → 211行）：拆分为 3 个文件 — `database.py`（`DatabaseManager`）、`history.py`（`DownloadHistoryManager`）、`pending.py`（`PendingTaskManager`）
+  - `src/ui/list_mixin.py`（510行 → 184行）：拆分为 2 个文件 — `list_mixin.py`（`ListMixin` 列表展示/缩略图/canvas管理）、`list_card.py`（`ListCardMixin` 卡片创建/标签渲染/翻译交互）
+  - `src/ui/detail_mixin.py`（437行 → 306行）：拆分为 2 个文件 — `detail_mixin.py`（`DetailMixin` 详情面板/展示/懒加载）、`detail_actions.py`（`DetailActionsMixin` 隐藏/刷新/删除/复制操作）
+- **优化**：所有 30 个 Python 模块文件均 ≤ 366 行，最大文件为 `search_mixin.py`（366行）
+- **修复**：「隐藏下载」翻页过滤失效 — 启用「隐藏下载」模式后翻页（或标签/关键词/厂商搜索翻页），新页数据从 API 加载后未重新应用过滤器导致已下载作品再次出现。修复 `_on_data_loaded`（推荐/最新列表翻页）和搜索成功回调（`_on_tag_search_success`/`_on_keyword_search_success`/`_on_circle_search_success`）共 4 条代码路径，数据加载完成后统一检查 `show_downloaded` 状态并重新过滤
+
 ## v1.34.0
 - **优化**：移除列表渲染阻塞 — `display_works_list` 中移除 `update_idletasks()` 强制同步刷新调用，列表渲染不再阻塞主线程，页面切换流畅度明显提升
 - **优化**：标签绘制性能 — `_draw_tags_on_canvas` 使用 `tkfont.Font.measure()` 预计算文本宽度，替代每标签创建/删除 Canvas 对象的测宽方式，减少约 100 次/页的 GC 压力

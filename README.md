@@ -4,7 +4,7 @@
 
 ## 版本
 
-**v1.34.0**（当前版本）
+**v1.35.0**（当前版本）
 
 ## 功能特性
 
@@ -96,42 +96,54 @@
 
 ## 项目结构
 
-- **新增**：`src/ui/detail_mixin.py` - 详情面板（循环滚动、懒加载、CV/厂商显示）
-- **新增**：`src/ui/list_mixin.py` - 作品列表（缩略图加载、加载动画、滚动支持、AI翻译）
-- **新增**：`src/ui/search_mixin.py` - 统一搜索（ID/标签/关键词、搜索框标签芯片）
-- **新增**：`src/ui/filter_mixin.py` - 筛选排序（只看已下载、内存排序、封面补全）
-- **新增**：`src/download/manager.py` - 全局下载管理器（单例、统一轮询、观察者模式）
-- **新增**：`src/services/translator.py` - AI 翻译服务（OpenAI 兼容 API、翻译缓存）
-- 通过 Mixin 多继承组合到 WorkApp，MRO：`WorkApp > DetailMixin > ListMixin > SearchMixin > FilterMixin`
+- `src/ui/detail_mixin.py` / `src/ui/detail_actions.py` — 详情面板（展示、滚动、懒加载、CV/厂商显示）+ 操作（隐藏、刷新、删除、复制）
+- `src/ui/list_mixin.py` / `src/ui/list_card.py` — 作品列表（缩略图加载、加载动画、滚动、canvas管理）+ 卡片（创建、标签渲染、AI翻译交互）
+- `src/ui/search_mixin.py` — 统一搜索（ID/标签/关键词、搜索框标签芯片）
+- `src/ui/filter_mixin.py` — 筛选排序（只看已下载、内存排序、封面补全）
+- `gui_app_ui.py` / `gui_app_nav.py` / `gui_app_events.py` — 主窗口 Mixin（`UISetupMixin` 样式/UI构建、`NavigationMixin` 数据加载/分页、`EventMixin` 搜索历史/快捷键）
+- `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
+- `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、翻译缓存）
+- 通过 Mixin 多继承组合到 WorkApp，MRO：`WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin`
 
 ```
 g:\code\音声下载\
+├── gui_app.py                  # 主程序入口（Mixin模式组合，核心类 + 工具方法）
+├── gui_app_ui.py               # UISetupMixin（样式配置、UI构建、下载任务显示）
+├── gui_app_nav.py              # NavigationMixin（数据加载、分页导航、按钮状态管理）
+├── gui_app_events.py           # EventMixin（搜索历史、键盘快捷键、鼠标滚轮事件）
 ├── src/                        # 核心业务模块包
 │   ├── __init__.py             # 统一导出
 │   ├── config.py               # 配置读取（带默认值容错）
 │   ├── api_client.py           # API 请求客户端（带指数退避重试 + 缓存去重）
 │   ├── database/
 │   │   ├── __init__.py
-│   │   ├── database.py         # SQLite 数据库（作品缓存、下载历史、翻译结果独立表）
+│   │   ├── database.py         # DatabaseManager（作品缓存、翻译记录、数据库索引）
+│   │   ├── history.py          # DownloadHistoryManager（下载历史、作品详情更新、翻译标题）
+│   │   ├── pending.py          # PendingTaskManager（下载任务持久化、恢复）
 │   │   └── cache.py            # 图片缓存（LRU内存+磁盘两级缓存）
 │   ├── download/
 │   │   ├── __init__.py
+│   │   ├── models.py           # 数据模型（TaskStatus枚举、DownloadTask数据类）
 │   │   ├── downloader.py       # Aria2 下载管理（异步下载、连接复用、进度查询）
 │   │   ├── downloader_direct.py # 直接下载模块（HTTP 下载，不依赖 Aria2）
-│   │   └── manager.py          # 全局下载管理器（单例、统一轮询、观察者模式）
+│   │   ├── manager.py          # DownloadManager 主类（单例、初始化、队列、取消、重试）
+│   │   ├── manager_core.py     # DownloadCoreMixin（下载提交、持久化、队列处理）
+│   │   └── manager_poll.py     # DownloadPollMixin（轮询进度、重试、低速自重启）
 │   ├── services/
 │   │   ├── __init__.py
 │   │   └── translator.py       # AI 翻译服务（OpenAI 兼容 API、翻译缓存）
 │   └── ui/
 │       ├── __init__.py
-│       ├── detail_mixin.py     # 详情面板（滚动、懒加载、CV/厂商）
-│       ├── list_mixin.py       # 作品列表（缩略图、动画、滚动、AI翻译）
+│       ├── detail_mixin.py     # DetailMixin（详情面板构建、展示、懒加载）
+│       ├── detail_actions.py   # DetailActionsMixin（隐藏作品、刷新信息、删除记录、复制）
+│       ├── list_mixin.py       # ListMixin（列表展示管理、缩略图加载、canvas滚动）
+│       ├── list_card.py        # ListCardMixin（卡片创建、标签Canvas渲染、AI翻译交互）
 │       ├── search_mixin.py     # 搜索逻辑（ID/标签/关键词/厂商、搜索框芯片）
 │       ├── filter_mixin.py     # 筛选排序（已下载、内存排序、封面补全）
 │       ├── gui_download.py     # 下载窗口（树形选择、提交即返回、译文标题）
 │       ├── gui_settings.py     # 设置窗口（含缓存管理、数据库路径自定义、AI翻译设置）
+│       ├── gui_download_manager.py # 下载管理窗口（正在下载/已完成、重试/取消、进度更新）
 │       └── tree_selector.py    # 树状图选择工具类
-├── gui_app.py                  # 主程序入口（Mixin模式组合）
 ├── settings/                   # 配置和数据库目录（默认位置）
 │   ├── config.json             # JSON 配置文件
 │   ├── works.db                # SQLite 数据库文件（作品缓存）
@@ -200,17 +212,12 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 - `load_from_url(url, size)` - 从 URL 加载并缓存指定尺寸图片
 - `get_http_session()` - 获取线程本地 requests.Session（连接复用）
 
-### src/database/database.py
-数据库管理模块，所有操作使用 `contextmanager` 确保连接安全关闭：
-- 创建和管理 SQLite 数据库
-- 保存和读取作品数据（含声优、厂商、封面、mainCoverUrl）
-- 翻译结果独立存储（`translations` 表，按 work_id 索引）
-- 管理分页数据
-- 下载历史管理（支持增量更新，不重置时间戳）
-- RJ ID 统一格式（自动规范化比较）
-- `get_work_detail_cached(rj_id)` - 从本地数据库查询声优/厂商信息，命中则跳过 API
-- `update_works_cache(work, page)` - 更新作品缓存（含懒加载获取的声优/厂商/封面）
-- 数据库索引：`works.work_id`、`works.page`、`download_history.rj_id`、`download_history.created_at`、`translations.work_id`
+### src/database/
+数据库管理模块（拆分为 3 个文件），所有操作使用 `contextmanager` 确保连接安全关闭：
+
+- **database.py** — `DatabaseManager`：作品缓存管理、翻译记录存储、分页数据、数据库索引
+- **history.py** — `DownloadHistoryManager`：下载历史记录、作品详情更新（声优/厂商/封面）、下载作品查询、翻译标题存取
+- **pending.py** — `PendingTaskManager`：下载任务持久化（提交中/下载中/排队中/失败）、启动恢复、状态同步
 
 ### src/download/downloader.py
 下载管理模块，负责：
@@ -229,16 +236,13 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 - `DirectDownloader` - 直接下载器类
 - `poll_direct_progress(task_ids)` - 轮询直接下载进度
 
-### src/download/manager.py
-全局下载管理器（线程安全单例），核心调度层：
-- `DownloadManager` — 单例，统一管理所有下载任务的注册、提交、轮询、取消
-- `DownloadTask` — 任务数据模型（work_id、gids、进度、状态、速度）
-- `TaskStatus` — 任务状态枚举（submitting / downloading / completed / failed / cancelled）
-- **提交即返回**：`submit(work, files)` 立即创建任务，后台线程逐一调用 Aria2 addUri
-- **Housekeeper**：后台线程静默执行封面下载、标签保存、下载历史写入
-- **统一轮询**：有任务时自动启动轮询线程，全部完成后自动退出
-- **观察者模式**：`add_observer(callback)` 通知主界面实时更新底部任务列表
-- **幂等保护**：同一作品正在下载中再次提交自动忽略
+### src/download/manager.py + manager_core.py + manager_poll.py + models.py
+全局下载管理器（线程安全单例），拆分为 4 个文件，核心调度层：
+
+- **models.py** — `TaskStatus`（任务状态枚举：submitting/downloading/completed/failed/cancelled/queued）、`DownloadTask`（数据模型：work_id/gids/进度/状态/速度）
+- **manager.py** — `DownloadManager` 主类（单例）：初始化、`submit(work, files)` 提交即返回、`cancel/retry` 取消/重试、`get_all_tasks/get_active_tasks` 查询、`restore_pending_tasks` 恢复持久化任务、`add_observer` 观察者模式通知
+- **manager_core.py** — `DownloadCoreMixin`：Aria2/直接下载提交逻辑、文件完整性检查（跳过已完整文件）、任务持久化/状态同步、队列模式处理
+- **manager_poll.py** — `DownloadPollMixin`：全局统一轮询循环（有任务自动启动/全完成自动退出）、Aria2/直接下载进度合并、失败自动重试（最多 3 次）、低速检测与自动重启（可配置阈值/时长/次数）
 
 ### src/ui/tree_selector.py
 树状图选择工具类，提供：
@@ -249,8 +253,18 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 - `invert_selection()` - 反选所有节点
 - `expand_all()` / `collapse_all()` - 展开/折叠所有节点
 
-### WorkApp (gui_app.py)
-主应用程序类，通过 Mixin 多继承组合功能模块：
+### WorkApp (gui_app.py + gui_app_ui.py + gui_app_nav.py + gui_app_events.py)
+主应用程序类，通过 Mixin 多继承组合功能模块（拆分为 4 个文件，总行数从 891 行降至各文件均 ≤ 366 行）：
+
+- **gui_app.py**（167行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`main` 入口
+- **gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 全部控件构建、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理
+- **gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航、`update_buttons()` 按钮状态、`refresh_data()` 数据刷新
+- **gui_app_events.py**（142行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航、`_bind_shortcuts()` 全局快捷键绑定、`_on_mouse_wheel()` 滚轮事件、`_on_escape()` ESC 清除搜索
+
+Mixin 继承链（MRO 从左到右，深度优先）：
+```
+WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin
+```
 
 ## 界面说明
 
@@ -400,6 +414,9 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 2. ✅ **下载作品缓存频繁失效** — `_on_dl_tasks_changed` 改为仅在下任务完成或失败时使缓存失效，进度更新不再触发缓存失效，避免频繁重新加载
 3. ✅ **作品信息完整性误判** — 空声优数组 `[]` 和空厂商字典 `{}` 视为"已获取"而非"缺失"，避免对本身无此信息的作品重复请求 API
 4. ✅ **作品缓存初始化优化** — `_load_downloaded_works` 在加载后立即根据数据库中的完整信息初始化 `_fetched_ids`，减少不必要的 API 请求
+
+#### 已修复（v1.35.0）
+1. ✅ **「隐藏下载」翻页过滤失效** — 启用「隐藏下载」后翻页（或搜索翻页）时新页数据未重新应用过滤器，导致已下载作品重新出现。修复 `_on_data_loaded` 和标签/关键词/厂商搜索成功回调共 4 条路径，数据加载完成后统一检查 `show_downloaded` 状态并过滤，状态栏同步显示过滤后数量
 
 #### 待修复
 暂无

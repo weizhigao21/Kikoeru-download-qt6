@@ -1,16 +1,17 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import threading
 import logging
 
 from PIL import ImageTk
 
 from ..api_client import get_api_client
+from .detail_actions import DetailActionsMixin
 
 logger = logging.getLogger('detail_mixin')
 
 
-class DetailMixin:
+class DetailMixin(DetailActionsMixin):
     def setup_detail_panel(self):
         for widget in self.detail_frame.winfo_children():
             widget.destroy()
@@ -58,7 +59,7 @@ class DetailMixin:
         self.detail_toggle_btn.pack(side=tk.LEFT, padx=(3, 0))
         self.detail_toggle_btn.pack_forget()
 
-        self.detail_copy_title_btn = tk.Button(detail_title_frame, text="\U0001f4cb", font=("Segoe UI Emoji", 10),
+        self.detail_copy_title_btn = tk.Button(detail_title_frame, text="📋", font=("Segoe UI Emoji", 10),
                                                relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
                                                bg="#f0f0f0", fg="#666666",
                                                command=self._copy_detail_title)
@@ -82,7 +83,7 @@ class DetailMixin:
         detail_id_frame.pack(anchor=tk.W, pady=(0, 5))
         self.info_labels["id"] = ttk.Label(detail_id_frame, text="", font=("Microsoft YaHei UI", 10), foreground="blue")
         self.info_labels["id"].pack(side=tk.LEFT)
-        self.detail_copy_id_btn = tk.Button(detail_id_frame, text="\U0001f4cb", font=("Segoe UI Emoji", 10),
+        self.detail_copy_id_btn = tk.Button(detail_id_frame, text="📋", font=("Segoe UI Emoji", 10),
                                             relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
                                             bg="#f0f0f0", fg="#666666",
                                             command=self._copy_detail_id)
@@ -128,7 +129,7 @@ class DetailMixin:
         self.current_work_index = index
         work = self.works[index]
 
-        title = work.get("title", "\u65e0\u6807\u9898")
+        title = work.get("title", "无标题")
         self._detail_original_title = title
         self._detail_translated_title = ""
         self._detail_show_translated = False
@@ -140,7 +141,7 @@ class DetailMixin:
                 self._detail_translated_title = cached_translated
                 self._detail_show_translated = True
                 self.info_labels["title"].config(text=cached_translated)
-                self.detail_toggle_btn.config(text="\u539f")
+                self.detail_toggle_btn.config(text="原")
                 self.detail_toggle_btn.pack(side=tk.LEFT, padx=(3, 0))
             else:
                 self.info_labels["title"].config(text=title)
@@ -153,7 +154,7 @@ class DetailMixin:
 
         circle = work.get("circle", {})
         circle_name = circle.get("name", "") if isinstance(circle, dict) else ""
-        self.info_labels["circle"].config(text=circle_name if circle_name else "  \u65e0\u5382\u5546\u4fe1\u606f")
+        self.info_labels["circle"].config(text=circle_name if circle_name else "  无厂商信息")
         if circle_name:
             self.info_labels["circle"].bind("<Button-1>", lambda e, cn=circle_name: self.search_by_circle(cn))
         else:
@@ -164,7 +165,7 @@ class DetailMixin:
             cv_names = ", ".join([va.get("name", "") for va in vas if va.get("name")])
             self.info_labels["cv"].config(text=cv_names)
         else:
-            self.info_labels["cv"].config(text="  \u65e0\u58f0\u4f18\u4fe1\u606f")
+            self.info_labels["cv"].config(text="  无声优信息")
 
         tags = [tag["i18n"]["zh-cn"]["name"] for tag in work.get("tags", []) if tag.get("i18n", {}).get("zh-cn")]
         tags = [t for t in tags if t]
@@ -186,11 +187,11 @@ class DetailMixin:
                     self.image_label.config(image=cached_thumb, text="")
                     self.image_label.image = cached_thumb
                 else:
-                    self.image_label.config(image="", text="\u52a0\u8f7d\u4e2d...")
+                    self.image_label.config(image="", text="加载中...")
                 self.image_frame.config(background="#e0e0e0")
                 threading.Thread(target=self._load_detail_image, args=(thumbnail,), daemon=True).start()
         else:
-            self.image_label.config(image="", text="\u65e0\u5c01\u9762")
+            self.image_label.config(image="", text="无封面")
             self.image_frame.config(background="#e0e0e0")
         logger.debug("show_work_detail 图片完成")
 
@@ -202,7 +203,7 @@ class DetailMixin:
             ])
             self.info_labels["editions"].config(text=editions_text)
         else:
-            self.info_labels["editions"].config(text="  \u65e0\u5176\u4ed6\u8bed\u8a00\u7248\u672c")
+            self.info_labels["editions"].config(text="  无其他语言版本")
 
         circle = work.get("circle", {})
         has_circle = isinstance(circle, dict) and circle.get("name")
@@ -296,7 +297,7 @@ class DetailMixin:
     def _update_detail_image_error(self):
         try:
             if self.image_label.winfo_exists():
-                self.image_label.config(image="", text="\u52a0\u8f7d\u5931\u8d25")
+                self.image_label.config(image="", text="加载失败")
         except Exception:
             pass
 
@@ -350,154 +351,3 @@ class DetailMixin:
             self.info_labels["circle"].config(text=circle_name)
             self.info_labels["circle"].bind("<Button-1>", lambda e, cn=circle_name: self.search_by_circle(cn))
         self.db.update_works_cache(work, self.current_page)
-
-    def hide_current_work(self):
-        if self.current_work_index < 0 or self.current_work_index >= len(self.works):
-            return
-        work = self.works[self.current_work_index]
-        work_id = str(work.get("id", ""))
-        self.db.hide_work(work_id)
-        self.status_label.config(text=f"\u2713 \u5df2\u9690\u85cf: {work.get('title', '')[:20]}...")
-        next_index = self.current_work_index
-        del self.works[self.current_work_index]
-        if self.works:
-            if next_index >= len(self.works):
-                next_index = len(self.works) - 1
-            self.display_works_list()
-            self.show_work_detail(next_index)
-        else:
-            self.display_empty_state()
-            self.show_work_detail(-1)
-
-    def _refresh_work_detail(self):
-        if self.current_work_index < 0 or self.current_work_index >= len(self.works):
-            return
-        work = self.works[self.current_work_index]
-        source_id = work.get("source_id", "")
-        if not source_id:
-            return
-
-        self.refresh_detail_btn.config(state=tk.DISABLED, text="\u5237\u65b0\u4e2d...")
-        self.status_label.config(text="\u6b63\u5728\u91cd\u65b0\u83b7\u53d6\u4f5c\u54c1\u4fe1\u606f...")
-        threading.Thread(target=self._refresh_work_detail_async, args=(self.current_work_index, source_id), daemon=True).start()
-
-    def _refresh_work_detail_async(self, index, source_id):
-        try:
-            api_client = get_api_client()
-            data = api_client.fetch_work_detail(source_id)
-            self.root.after(0, self._on_refresh_complete, index, data)
-        except Exception as e:
-            self.root.after(0, self._on_refresh_error, str(e))
-
-    def _on_refresh_complete(self, index, data):
-        if index != self.current_work_index or index >= len(self.works):
-            return
-
-        work = self.works[index]
-        work["title"] = data.get("title", work.get("title", ""))
-        work["thumbnailCoverUrl"] = data.get("thumbnailCoverUrl", "")
-        work["mainCoverUrl"] = data.get("mainCoverUrl", "")
-        work["tags"] = data.get("tags", [])
-        work["vas"] = data.get("vas", [])
-        work["circle"] = data.get("circle", {})
-        work["other_language_editions_in_db"] = data.get("other_language_editions_in_db", [])
-
-        if self.current_tab == "recommend":
-            self.db.update_works_cache(work, self.current_page)
-
-        source_id = work.get("source_id", "")
-        normalized = self._normalize_rj_id(source_id)
-        if normalized in self.downloaded_ids_cache:
-            tags = [tag["i18n"]["zh-cn"]["name"] for tag in data.get("tags", []) if tag.get("i18n", {}).get("zh-cn")]
-            tags = [t for t in tags if t] or None
-            self.download_history.update_work_detail(
-                f"RJ{normalized}",
-                thumbnail_url=data.get("thumbnailCoverUrl") or None,
-                main_cover_url=data.get("mainCoverUrl") or None,
-                tags=tags,
-                vas=data.get("vas", []) or None,
-                circle_data=data.get("circle", {}) or None,
-                other_editions=data.get("other_language_editions_in_db", []) or None
-            )
-
-        self.refresh_detail_btn.config(state=tk.NORMAL, text="\u5237\u65b0\u4fe1\u606f")
-        self.status_label.config(text="\u2713 \u4f5c\u54c1\u4fe1\u606f\u5df2\u5237\u65b0")
-        self.show_work_detail(index)
-        self.display_works_list()
-
-    def _on_refresh_error(self, msg):
-        self.refresh_detail_btn.config(state=tk.NORMAL, text="\u5237\u65b0\u4fe1\u606f")
-        self.status_label.config(text="")
-        messagebox.showerror("\u5237\u65b0\u5931\u8d25", f"\u83b7\u53d6\u4f5c\u54c1\u4fe1\u606f\u5931\u8d25: {msg}")
-
-    def _delete_download_record(self):
-        if self.current_work_index < 0 or self.current_work_index >= len(self.works):
-            return
-        work = self.works[self.current_work_index]
-        source_id = work.get("source_id", "")
-        if not source_id:
-            return
-
-        title = work.get("title", "\u672a\u77e5\u4f5c\u54c1")
-        if not messagebox.askyesno("\u786e\u8ba4\u5220\u9664", f"\u786e\u5b9a\u8981\u5220\u9664\u300c{title[:30]}\u300d\u7684\u4e0b\u8f7d\u8bb0\u5f55\u5417\uff1f\n\uff08\u4ec5\u5220\u9664\u6570\u636e\u5e93\u8bb0\u5f55\uff0c\u4e0d\u5f71\u54cd\u5df2\u4e0b\u8f7d\u7684\u6587\u4ef6\uff09"):
-            return
-
-        db_rj_id = f"RJ{self._normalize_rj_id(source_id)}"
-        self.download_history.delete_download(db_rj_id)
-
-        normalized = self._normalize_rj_id(source_id)
-        self.downloaded_ids_cache.discard(normalized)
-        self._update_downloaded_count()
-
-        if hasattr(self, '_all_downloaded_works') and self._all_downloaded_works:
-            self._all_downloaded_works = [
-                w for w in self._all_downloaded_works
-                if self._normalize_rj_id(w.get("source_id", "")) != normalized
-            ]
-        if hasattr(self, 'downloaded_works_cache') and self.downloaded_works_cache:
-            self.downloaded_works_cache = [
-                w for w in self.downloaded_works_cache
-                if self._normalize_rj_id(w.get("source_id", "")) != normalized
-            ]
-
-        self.status_label.config(text=f"\u2713 \u5df2\u5220\u9664\u4e0b\u8f7d\u8bb0\u5f55: {title[:20]}...")
-        if self.show_downloaded == 3:
-            if self.works:
-                next_idx = self.current_work_index
-                del self.works[self.current_work_index]
-                if self.works:
-                    if next_idx >= len(self.works):
-                        next_idx = len(self.works) - 1
-                    self.display_works_list()
-                    self.show_work_detail(next_idx)
-                else:
-                    self.display_empty_state()
-                    self.show_work_detail(-1)
-        else:
-            self.display_works_list()
-            self.show_work_detail(self.current_work_index)
-
-    def _toggle_detail_title(self):
-        if self._detail_show_translated:
-            self._detail_show_translated = False
-            self.info_labels["title"].config(text=self._detail_original_title)
-            self.detail_toggle_btn.config(text="\u8bd1")
-        else:
-            self._detail_show_translated = True
-            self.info_labels["title"].config(text=self._detail_translated_title)
-            self.detail_toggle_btn.config(text="\u539f")
-
-    def _copy_detail_title(self):
-        if self._detail_show_translated and self._detail_translated_title:
-            text = self._detail_translated_title
-        else:
-            text = self._detail_original_title
-        self.copy_to_clipboard(text)
-
-    def _copy_detail_id(self):
-        if self.current_work_index < 0 or self.current_work_index >= len(self.works):
-            return
-        work = self.works[self.current_work_index]
-        source_id = work.get("source_id", "")
-        if source_id:
-            self.copy_to_clipboard(source_id)

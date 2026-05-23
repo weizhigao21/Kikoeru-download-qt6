@@ -6,7 +6,7 @@ from .config import (
     DOWNLOAD_DIR, ARIA2_DIR, DB_DIR
 )
 from .api_client import get_api_client
-from .database.database import DatabaseManager, DownloadHistoryManager, PendingTaskManager
+from .database import DatabaseManager, DownloadHistoryManager, PendingTaskManager
 from .database.cache import ImageCacheManager, get_http_session
 from .download.downloader import get_downloader
 from .ui.gui_download import DownloadWindow
