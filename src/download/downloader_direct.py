@@ -80,7 +80,48 @@ class DirectDownloader:
 
             try:
                 session = get_http_session()
-                response = session.get(url, stream=True, timeout=30)
+
+                local_offset = 0
+                use_range = False
+
+                if os.path.exists(filepath):
+                    local_offset = os.path.getsize(filepath)
+                    if local_offset > 0:
+                        headers = {"Range": f"bytes={local_offset}-"}
+                        response = session.get(url, stream=True, timeout=30, headers=headers)
+
+                        if response.status_code == 416:
+                            print(f"[直接下载] 文件已完整(416)，跳过: {filename}")
+                            remote_size = get_remote_file_size(url)
+                            final_size = remote_size if remote_size > 0 else local_offset
+                            if task_id:
+                                with _progress_lock:
+                                    _download_progress[task_id]["total"] = final_size
+                                    _download_progress[task_id]["completed"] = final_size
+                                    _download_progress[task_id]["status"] = "complete"
+                                    _download_progress[task_id]["speed"] = 0
+                            return True
+
+                        if response.status_code == 206:
+                            use_range = True
+                            content_range = response.headers.get('content-range', '')
+                            total_from_header = 0
+                            if content_range and '/' in content_range:
+                                try:
+                                    total_from_header = int(content_range.split('/')[-1])
+                                except (ValueError, IndexError):
+                                    pass
+                            if total_from_header == 0:
+                                total_from_header = get_remote_file_size(url)
+                            print(f"[直接下载] 断点续传: {filename} ({local_offset}/{total_from_header})")
+                        else:
+                            print(f"[直接下载] 服务端不支持Range({response.status_code})，从头重新下载: {filename}")
+                            response.close()
+                            response = session.get(url, stream=True, timeout=30)
+                    else:
+                        response = session.get(url, stream=True, timeout=30)
+                else:
+                    response = session.get(url, stream=True, timeout=30)
 
                 if response.status_code == 429:
                     wait_time = retry_wait * (2 ** attempt) + 5
@@ -90,17 +131,30 @@ class DirectDownloader:
 
                 response.raise_for_status()
 
-                total_size = int(response.headers.get('content-length', 0))
+                if use_range:
+                    content_range = response.headers.get('content-range', '')
+                    total_size = 0
+                    if content_range and '/' in content_range:
+                        try:
+                            total_size = int(content_range.split('/')[-1])
+                        except (ValueError, IndexError):
+                            pass
+                    if total_size == 0:
+                        total_size = get_remote_file_size(url)
+                else:
+                    total_size = int(response.headers.get('content-length', 0))
+
                 if task_id:
                     with _progress_lock:
                         _download_progress[task_id]["total"] = total_size
 
-                downloaded = 0
+                downloaded = local_offset
                 last_time = time.time()
-                last_downloaded = 0
+                last_downloaded = downloaded
                 update_interval = 0.3
 
-                with open(filepath, 'wb') as f:
+                file_mode = 'ab' if (use_range and local_offset > 0) else 'wb'
+                with open(filepath, file_mode) as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if self._cancelled:
                             if task_id:

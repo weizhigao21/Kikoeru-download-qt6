@@ -62,6 +62,7 @@ class DownloadManager:
         self._queue_processing = False
         self._max_concurrent = 1
         self._queue_mode = False
+        self._pending_db = None
 
         # 内存管理配置
         self._MAX_COMPLETED_TASKS = 100  # 保留最近100条已完成任务用于显示
@@ -72,9 +73,36 @@ class DownloadManager:
     def set_download_history(self, dh):
         self.download_history = dh
 
+    def set_pending_db(self, pdb):
+        self._pending_db = pdb
+
     def set_queue_mode(self, enabled, max_concurrent=1):
         self._queue_mode = enabled
         self._max_concurrent = max(1, max_concurrent)
+
+    def _persist_task(self, task):
+        if self._pending_db is None:
+            return
+        try:
+            self._pending_db.save_task(task)
+        except Exception as e:
+            print(f"[持久化] 保存任务失败: {task.work_id} - {e}")
+
+    def _remove_persisted(self, work_id):
+        if self._pending_db is None:
+            return
+        try:
+            self._pending_db.remove_task(work_id)
+        except Exception as e:
+            print(f"[持久化] 删除任务失败: {work_id} - {e}")
+
+    def _sync_task_status(self, task):
+        if self._pending_db is None:
+            return
+        try:
+            self._pending_db.update_status(task.work_id, task.status)
+        except Exception as e:
+            print(f"[持久化] 更新状态失败: {task.work_id} - {e}")
 
     def _get_active_count(self):
         with self._tasks_lock:
@@ -130,6 +158,8 @@ class DownloadManager:
             if old_task and old_task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED):
                 return work_id
             self.tasks[work_id] = task
+
+        self._persist_task(task)
 
         if self._queue_mode:
             with self._queue_lock:
@@ -198,6 +228,7 @@ class DownloadManager:
                 task.completed_at = time.time()
                 task.total_bytes = 0
                 task.completed_bytes = 0
+            self._sync_task_status(task)
             self._notify_observers()
             return
 
@@ -231,6 +262,7 @@ class DownloadManager:
                 task.status = TaskStatus.DOWNLOADING
             else:
                 task.status = TaskStatus.FAILED
+        self._sync_task_status(task)
         self._notify_observers()
 
         if gids:
@@ -273,6 +305,7 @@ class DownloadManager:
                 task.completed_at = time.time()
                 task.total_bytes = 0
                 task.completed_bytes = 0
+            self._sync_task_status(task)
             self._notify_observers()
             return
 
@@ -401,6 +434,8 @@ class DownloadManager:
                 else:
                     task.status = TaskStatus.COMPLETED
                     task.completed_at = time.time()
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            self._sync_task_status(task)
 
     def _poll_aria2_task(self, task):
         old_gids_count = len(task.gids)
@@ -484,6 +519,7 @@ class DownloadManager:
                             ).start()
                         else:
                             task.status = TaskStatus.FAILED
+        self._sync_task_status(task)
 
     def _retry_task(self, task):
         import random
@@ -550,6 +586,7 @@ class DownloadManager:
                 if t.work_id != work_id
             )
 
+        self._remove_persisted(work_id)
         self._notify_observers()
 
     def retry(self, work_id: str) -> bool:
@@ -616,6 +653,79 @@ class DownloadManager:
 
     def is_queue_mode(self) -> bool:
         return self._queue_mode
+
+    def restore_pending_tasks(self):
+        if self._pending_db is None:
+            return
+        try:
+            pending_list = self._pending_db.get_all_pending()
+            restored_count = 0
+            for item in pending_list:
+                work_id = item.get("work_id", "")
+                if not work_id or work_id in self.tasks:
+                    continue
+                status_str = item.get("status", "failed")
+                if status_str == "completed":
+                    self._pending_db.remove_task(work_id)
+                    continue
+
+                task = DownloadTask(
+                    work_id=work_id,
+                    title=item.get("title", "未命名"),
+                    total_files=len(item.get("files", [])),
+                    created_at=item.get("created_at", time.time()),
+                    work=item.get("work", {}),
+                    files=item.get("files", []),
+                    save_dir=item.get("save_dir", ""),
+                    download_method=item.get("download_method", "aria2"),
+                )
+
+                if status_str in ("submitting", "downloading", "queued"):
+                    task.status = TaskStatus.FAILED
+                else:
+                    try:
+                        task.status = TaskStatus(status_str)
+                    except ValueError:
+                        task.status = TaskStatus.FAILED
+
+                with self._tasks_lock:
+                    self.tasks[work_id] = task
+
+                self._persist_task(task)
+                restored_count += 1
+
+            if restored_count > 0:
+                print(f"[持久化] 恢复 {restored_count} 个未完成下载任务")
+                self._notify_observers()
+            return restored_count
+        except Exception as e:
+            print(f"[持久化] 恢复任务失败: {e}")
+            return 0
+
+    def clear_pending_task(self, work_id: str):
+        with self._tasks_lock:
+            task = self.tasks.pop(work_id, None)
+        if task:
+            self._remove_persisted(work_id)
+            self._notify_observers()
+            return True
+        return False
+
+    def clear_all_pending(self):
+        with self._tasks_lock:
+            work_ids = [
+                wid for wid, t in self.tasks.items()
+                if t.status in (TaskStatus.FAILED, TaskStatus.SUBMITTING,
+                                TaskStatus.DOWNLOADING, TaskStatus.QUEUED)
+            ]
+            for wid in work_ids:
+                del self.tasks[wid]
+        if self._pending_db:
+            try:
+                self._pending_db.clear_all()
+            except Exception as e:
+                print(f"[持久化] 清除所有待处理任务失败: {e}")
+        self._notify_observers()
 
     def _cleanup_completed_tasks(self):
         with self._tasks_lock:

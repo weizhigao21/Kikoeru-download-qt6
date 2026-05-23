@@ -15,7 +15,7 @@ from src import (
     _APP_ROOT, VERSION, MEMORY_CACHE_SIZE,
     CACHE_DIR, DB_PATH, DOWNLOAD_HISTORY_DB_PATH, ICON_PATH,
     DOWNLOAD_DIR,
-    ImageCacheManager, DatabaseManager, DownloadHistoryManager,
+    ImageCacheManager, DatabaseManager, DownloadHistoryManager, PendingTaskManager,
     get_api_client, DownloadWindow, SettingsWindow
 )
 from src.download.manager import DownloadManager
@@ -55,9 +55,11 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.image_cache = ImageCacheManager(CACHE_DIR, MEMORY_CACHE_SIZE)
         self.db = DatabaseManager(DB_PATH)
         self.download_history = DownloadHistoryManager(DOWNLOAD_HISTORY_DB_PATH)
+        self.pending_task_db = PendingTaskManager(DOWNLOAD_HISTORY_DB_PATH)
 
         self.dl_manager = DownloadManager()
         self.dl_manager.set_download_history(self.download_history)
+        self.dl_manager.set_pending_db(self.pending_task_db)
         self.dl_manager.add_observer(self._on_dl_tasks_changed)
         self.dl_manager.set_queue_mode(_config.QUEUE_MODE, _config.MAX_CONCURRENT_DOWNLOADS)
 
@@ -94,7 +96,16 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self._load_downloaded_ids()
         self._bind_shortcuts()
         self.show_loading()
-        self.root.after(100, self.load_data_async)
+        self.root.after(100, self._on_startup_restore)
+        self.root.after(150, self.load_data_async)
+
+    def _on_startup_restore(self):
+        try:
+            count = self.dl_manager.restore_pending_tasks()
+            if count > 0:
+                self.status_label.config(text=f"已恢复 {count} 个未完成下载任务")
+        except Exception as e:
+            print(f"[启动] 恢复待处理任务异常: {e}")
 
     def _setup_styles(self):
         style = ttk.Style()

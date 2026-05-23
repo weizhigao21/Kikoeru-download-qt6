@@ -1,5 +1,10 @@
 # 更新日志
 
+## v1.32.0
+- **新增**：下载任务持久化 — 新增 `PendingTaskManager` 类，将未完成（submitting/downloading/queued/failed）的下载任务保存到 SQLite 数据库，程序重启后自动恢复为 FAILED 状态，用户可点击重试继续下载；已完成或取消的任务自动从持久化记录中清除
+- **新增**：直接下载断点续传 — `DirectDownloader` 支持 HTTP Range 请求，文件部分下载中断后重新下载时从断点位置续传（206 Partial Content），服务端不支持时自动回退从头下载；已完整文件返回 416 时直接跳过；进度条显示真实总进度（已有字节+新下字节）
+- **优化**：`DownloadManager` 新增 `restore_pending_tasks()`、`clear_pending_task()`、`clear_all_pending()` 公共方法，支持启动恢复和手动清理待处理任务
+
 ## v1.31.0
 - **新增**：下载文件名字符过滤 — 设置窗口「下载设置」页新增「文件名过滤字符」输入框，可自定义额外过滤的字符（如 `【】「」《》…`），与 Windows 非法字符合并处理，避免下载目录名包含特殊字符
 - **优化**：`WorkDownloader._get_save_dir()` 重构为基于集合的过滤逻辑，支持动态扩展非法字符集
