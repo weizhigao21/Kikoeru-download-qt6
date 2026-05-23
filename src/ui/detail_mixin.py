@@ -78,8 +78,15 @@ class DetailMixin:
         self.detail_tags_canvas._tag_data = []
 
         ttk.Label(self.detail_scrollable, text="ID:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
-        self.info_labels["id"] = ttk.Label(self.detail_scrollable, text="", font=("Microsoft YaHei UI", 10), foreground="blue")
-        self.info_labels["id"].pack(anchor=tk.W, pady=(0, 5))
+        detail_id_frame = tk.Frame(self.detail_scrollable, bg="#f0f0f0")
+        detail_id_frame.pack(anchor=tk.W, pady=(0, 5))
+        self.info_labels["id"] = ttk.Label(detail_id_frame, text="", font=("Microsoft YaHei UI", 10), foreground="blue")
+        self.info_labels["id"].pack(side=tk.LEFT)
+        self.detail_copy_id_btn = tk.Button(detail_id_frame, text="\U0001f4cb", font=("Segoe UI Emoji", 10),
+                                            relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
+                                            bg="#f0f0f0", fg="#666666",
+                                            command=self._copy_detail_id)
+        self.detail_copy_id_btn.pack(side=tk.LEFT, padx=(3, 0))
 
         ttk.Label(self.detail_scrollable, text="厂商:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
         self.info_labels["circle"] = tk.Label(
@@ -486,3 +493,11 @@ class DetailMixin:
         else:
             text = self._detail_original_title
         self.copy_to_clipboard(text)
+
+    def _copy_detail_id(self):
+        if self.current_work_index < 0 or self.current_work_index >= len(self.works):
+            return
+        work = self.works[self.current_work_index]
+        source_id = work.get("source_id", "")
+        if source_id:
+            self.copy_to_clipboard(source_id)

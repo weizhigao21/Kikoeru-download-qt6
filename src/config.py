@@ -40,7 +40,7 @@ _APP_ROOT = _get_app_root()
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.26.0"
+VERSION = "v1.29.0"
 
 _cfg = {}
 try:
