@@ -69,6 +69,19 @@ class FilterMixin:
             return
 
         self._all_downloaded_works = self._sort_works(self._all_downloaded_works, sort_key)
+        
+        self._fetched_ids.clear()
+        for work in self._all_downloaded_works:
+            rj_id = work.get("source_id")
+            has_thumb = bool(work.get("thumbnailCoverUrl"))
+            vas = work.get("vas")
+            has_vas = vas is not None  # vas 为空列表 [] 也算"已获取"
+            circle = work.get("circle")
+            has_circle_name = circle is not None and isinstance(circle, dict)  # circle 为空字典 {} 也算"已获取"
+            
+            if rj_id and has_thumb and has_vas and has_circle_name:
+                self._fetched_ids.add(rj_id)
+        
         self._downloaded_cache_valid = True
         self.root.after(0, self._show_downloaded_page)
 
@@ -81,8 +94,9 @@ class FilterMixin:
                    for i, work in enumerate(self._all_downloaded_works)
                    if work.get("source_id") not in self._fetched_ids
                    and (not work.get("thumbnailCoverUrl")
-                        or not work.get("vas")
-                        or not (work.get("circle") and work["circle"].get("name")))]
+                        or work.get("vas") is None
+                        or work.get("circle") is None)]
+        
         if missing:
             self.status_label.config(text=f"正在补全 {len(missing)} 个作品的信息...")
             threading.Thread(target=self._fetch_missing_thumbnails, args=(missing,), daemon=True).start()
@@ -149,9 +163,12 @@ class FilterMixin:
                 for future in as_completed(futures):
                     rj_id, thumb_url, main_url, tags, vas, circle, other_editions = future.result()
                     self._fetched_ids.add(rj_id)
+                    
                     if thumb_url is None:
                         continue
+                    
                     tag_names = extract_tags(tags) if tags else []
+                    
                     self.download_history.update_work_detail(
                         rj_id,
                         thumbnail_url=thumb_url or None,

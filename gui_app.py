@@ -691,7 +691,13 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
     def _on_dl_tasks_changed(self):
         self.root.after(0, self._refresh_task_display)
         self.root.after(0, self._update_downloaded_count)
-        self._downloaded_cache_valid = False
+        # 只在下载任务完成或失败时才使缓存失效（新增/删除作品）
+        # 进度更新不应使缓存失效
+        tasks = self.dl_manager.get_all_tasks()
+        completed_or_failed = [t for t in tasks 
+                              if t.status.value in ("completed", "failed")]
+        if completed_or_failed:
+            self._downloaded_cache_valid = False
 
     def _refresh_task_display(self):
         tasks = self.dl_manager.get_all_tasks()

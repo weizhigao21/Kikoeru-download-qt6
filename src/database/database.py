@@ -369,7 +369,8 @@ class DownloadHistoryManager:
                 updates.append("other_editions = ?")
                 params.append(json.dumps(other_editions, ensure_ascii=False) if other_editions else "")
             if updates:
-                params.append(f"RJ{self._normalize_rj_id(rj_id)}")
+                normalized_id = f"RJ{self._normalize_rj_id(rj_id)}"
+                params.append(normalized_id)
                 cursor.execute(f"UPDATE download_history SET {', '.join(updates)} WHERE rj_id = ?", params)
                 conn.commit()
 
