@@ -32,6 +32,7 @@ class SettingsWindow:
             "ai_base": cfg.get("ai_api_base_url", "https://api.openai.com/v1"),
             "ai_model": cfg.get("ai_model", "gpt-3.5-turbo"),
             "ai_translate_editable": cfg.get("ai_translate_editable", True),
+            "filename_filter_chars": cfg.get("filename_filter_chars", ""),
         }
 
         win_w = 700
@@ -135,6 +136,13 @@ class SettingsWindow:
         self.download_dir_var = tk.StringVar(value=self.current_values["download_dir"])
         ttk.Entry(dir_frame, textvariable=self.download_dir_var, width=35).pack(side=tk.LEFT)
         ttk.Button(dir_frame, text="浏览", command=self.browse_dir).pack(side=tk.LEFT, padx=(10, 0))
+
+        ttk.Label(form_frame, text="文件名过滤字符:", font=("Microsoft YaHei UI", 10)).grid(row=4, column=0, sticky=tk.W, pady=10)
+        filter_frame = ttk.Frame(form_frame)
+        filter_frame.grid(row=4, column=1, sticky=tk.W, padx=(20, 0))
+        self.filename_filter_var = tk.StringVar(value=self.current_values["filename_filter_chars"])
+        ttk.Entry(filter_frame, textvariable=self.filename_filter_var, width=25).pack(side=tk.LEFT)
+        ttk.Label(filter_frame, text="(额外过滤的字符，如 【】「」《》…)", font=("Microsoft YaHei UI", 9), foreground="gray").pack(side=tk.LEFT, padx=(8, 0))
 
     def _create_queue_page(self, parent):
         page = ttk.Frame(parent)
@@ -272,6 +280,7 @@ class SettingsWindow:
         new_ai_base = self.ai_base_var.get().strip()
         new_ai_model = self.ai_model_var.get().strip()
         new_ai_editable = self.ai_editable_var.get()
+        new_filename_filter = self.filename_filter_var.get().strip()
 
         if not new_download_dir:
             messagebox.showerror("错误", "下载目录不能为空", parent=self.window)
@@ -297,6 +306,7 @@ class SettingsWindow:
             cfg["ai_api_base_url"] = new_ai_base
             cfg["ai_model"] = new_ai_model
             cfg["ai_translate_editable"] = new_ai_editable
+            cfg["filename_filter_chars"] = new_filename_filter
 
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4, ensure_ascii=False)
@@ -323,6 +333,7 @@ class SettingsWindow:
         _config.AI_API_BASE_URL = new_ai_base
         _config.AI_MODEL = new_ai_model
         _config.AI_TRANSLATE_EDITABLE = new_ai_editable
+        _config.FILENAME_FILTER_CHARS = new_filename_filter
 
         from ..download.manager import DownloadManager
         manager = DownloadManager()

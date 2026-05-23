@@ -71,7 +71,11 @@ class WorkDownloader:
         if self._save_dir is None:
             source_id = self.work.get("source_id", "")
             title = self.work.get("title", "未命名")
-            safe_title = "".join(c for c in title if c not in r'\/:*?"<>|')[:50]
+            illegal_chars = set(r'\/:*?"<>|')
+            extra_chars = _config.FILENAME_FILTER_CHARS
+            if extra_chars:
+                illegal_chars |= set(extra_chars)
+            safe_title = "".join(c for c in title if c not in illegal_chars)[:50]
             folder_name = f"{source_id}-{safe_title}"
             self._save_dir = os.path.join(_config.DOWNLOAD_DIR, folder_name)
             os.makedirs(self._save_dir, exist_ok=True)

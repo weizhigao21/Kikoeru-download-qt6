@@ -26,7 +26,8 @@ _DEFAULT_CONFIG = {
     "ai_api_key": "",
     "ai_api_base_url": "https://api.openai.com/v1",
     "ai_model": "gpt-3.5-turbo",
-    "ai_translate_editable": True
+    "ai_translate_editable": True,
+    "filename_filter_chars": "",
 }
 
 
@@ -40,7 +41,7 @@ _APP_ROOT = _get_app_root()
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.30.0"
+VERSION = "v1.31.0"
 
 _cfg = {}
 try:
@@ -84,3 +85,4 @@ DOWNLOAD_METHOD = _cfg.get("download_method", "aria2")
 DIRECT_DOWNLOAD_THREADS = _cfg.get("direct_download_threads", 3)
 QUEUE_MODE = _cfg.get("queue_mode", False)
 MAX_CONCURRENT_DOWNLOADS = _cfg.get("max_concurrent_downloads", 1)
+FILENAME_FILTER_CHARS = _cfg.get("filename_filter_chars", "")
