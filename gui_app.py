@@ -16,7 +16,7 @@ from src import (
     CACHE_DIR, DB_PATH, DOWNLOAD_HISTORY_DB_PATH, ICON_PATH,
     DOWNLOAD_DIR,
     ImageCacheManager, DatabaseManager, DownloadHistoryManager, PendingTaskManager,
-    get_api_client, DownloadWindow, SettingsWindow
+    get_api_client, DownloadWindow, SettingsWindow, DownloadManagerWindow
 )
 from src.download.manager import DownloadManager
 from src.ui.detail_mixin import DetailMixin
@@ -272,37 +272,41 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
 
         bottom_frame = tk.Frame(main_frame, bg=colors["bg"])
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-        bottom_frame.columnconfigure(0, weight=1)
+        bottom_frame.columnconfigure(0, weight=0)
         bottom_frame.columnconfigure(1, weight=0)
         bottom_frame.columnconfigure(2, weight=1)
+        bottom_frame.columnconfigure(3, weight=0)
 
         self.dl_task_frame = tk.Frame(bottom_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
-        self.dl_task_frame.grid(row=0, column=0, sticky="w")
+        self.dl_task_frame.grid(row=0, column=1, sticky="w")
         self._dl_task_slots = []
-        for i in range(3):
+        for i in range(1):
             slot = self._create_task_slot()
             slot["frame"].grid(row=i, column=0, sticky="ew")
             slot["frame"].grid_remove()
             self._dl_task_slots.append(slot)
 
+        self.dl_mgr_btn = ttk.Button(bottom_frame, text="下载管理", command=self.open_download_manager)
+        self.dl_mgr_btn.grid(row=0, column=0, padx=(5, 10), pady=2)
+
         btn_container = tk.Frame(bottom_frame, bg=colors["bg"])
-        btn_container.grid(row=0, column=1, padx=10)
+        btn_container.grid(row=0, column=2)
 
         self.prev_btn = ttk.Button(btn_container, text="← 上一页", command=self.prev_page, state=tk.DISABLED)
-        self.prev_btn.grid(row=0, column=0, padx=5)
+        self.prev_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.page_var = tk.StringVar(value="1")
-        ttk.Label(btn_container, text="页码:").grid(row=0, column=1, padx=(5, 2))
+        ttk.Label(btn_container, text="页码:").pack(side=tk.LEFT, padx=(5, 2))
         self.page_entry = ttk.Entry(btn_container, textvariable=self.page_var, width=8, font=("Microsoft YaHei UI", 10))
-        self.page_entry.grid(row=0, column=2, padx=2)
+        self.page_entry.pack(side=tk.LEFT, padx=2)
         self.page_entry.bind("<Return>", lambda e: self.go_to_page())
-        ttk.Button(btn_container, text="跳转", command=self.go_to_page).grid(row=0, column=3, padx=2)
+        ttk.Button(btn_container, text="跳转", command=self.go_to_page).pack(side=tk.LEFT, padx=2)
 
         self.next_btn = ttk.Button(btn_container, text="下一页 →", command=self.next_page, state=tk.DISABLED)
-        self.next_btn.grid(row=0, column=4, padx=5)
+        self.next_btn.pack(side=tk.LEFT, padx=(5, 0))
 
         self.settings_btn = ttk.Button(bottom_frame, text="设置", command=self.open_settings)
-        self.settings_btn.grid(row=0, column=2, sticky="e", padx=5)
+        self.settings_btn.grid(row=0, column=3, sticky="e", padx=(10, 5))
 
         tk.Label(right_frame, text="当前作品", font=("Microsoft YaHei UI", 14, "bold"),
                  bg=colors["card_bg"], fg=colors["text"]).pack(pady=(10, 10))
@@ -809,44 +813,24 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         colors = self.COLORS
         row = tk.Frame(self.dl_task_frame, bg=colors["card_bg"])
 
-        id_label = tk.Label(row, font=("Microsoft YaHei UI", 9),
-                            bg=colors["card_bg"], fg=colors["text_secondary"], width=10, anchor=tk.W)
-        id_label.pack(side=tk.LEFT, padx=(5, 3))
+        id_label = tk.Label(row, font=("Consolas", 9, "bold"),
+                            bg=colors["card_bg"], fg=colors["primary"], width=12, anchor=tk.W)
+        id_label.pack(side=tk.LEFT, padx=(5, 5))
 
-        title_label = tk.Label(row, font=("Microsoft YaHei UI", 9),
-                               bg=colors["card_bg"], fg=colors["text"], anchor=tk.W)
-        title_label.pack(side=tk.LEFT, padx=(0, 5))
+        pct_label = tk.Label(row, font=("Consolas", 10),
+                             bg=colors["card_bg"], fg=colors["text"], width=5)
+        pct_label.pack(side=tk.LEFT)
 
-        pbar = ttk.Progressbar(row, mode='determinate', length=100)
-
-        pct_label = tk.Label(row, font=("Microsoft YaHei UI", 9),
-                             bg=colors["card_bg"], fg=colors["text"], width=4)
-
-        speed_label = tk.Label(row, font=("Microsoft YaHei UI", 9),
-                               bg=colors["card_bg"], fg=colors["text_hint"])
-
-        done_label = tk.Label(row, text="下载完成 ✓", font=("Microsoft YaHei UI", 9),
-                              bg=colors["card_bg"], fg=colors["success"])
-
-        fail_label = tk.Label(row, text="下载失败", font=("Microsoft YaHei UI", 9),
-                              bg=colors["card_bg"], fg=colors["error"])
-
-        retry_btn = ttk.Button(row, text="重试", width=6)
-
-        queued_label = tk.Label(row, text="排队中...", font=("Microsoft YaHei UI", 9),
-                                bg=colors["card_bg"], fg=colors["accent"])
+        speed_label = tk.Label(row, font=("Microsoft YaHei UI", 8),
+                               bg=colors["card_bg"], fg=colors["text_hint"], width=10)
+        speed_label.pack(side=tk.LEFT, padx=(5, 0))
 
         return {
             "frame": row,
             "id_label": id_label,
-            "title_label": title_label,
-            "pbar": pbar,
             "pct_label": pct_label,
             "speed_label": speed_label,
-            "done_label": done_label,
-            "fail_label": fail_label,
-            "retry_btn": retry_btn,
-            "queued_label": queued_label,
+            "_visible": False,
         }
 
     def _on_dl_tasks_changed(self):
@@ -863,61 +847,34 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
     def _refresh_task_display(self):
         tasks = self.dl_manager.get_all_tasks()
         active_tasks = [t for t in tasks if t.status.value in ("submitting", "downloading")]
-        queued_tasks = [t for t in tasks if t.status.value == "queued"]
-        failed_tasks = [t for t in tasks if t.status.value == "failed"]
-        completed_tasks = [t for t in tasks if t.status.value == "completed"]
-        recent_completed = [t for t in completed_tasks
-                           if t.completed_at and time.time() - t.completed_at < 10]
-
-        display_tasks = (active_tasks + queued_tasks[:1] + failed_tasks + recent_completed)[:3]
 
         for idx, slot in enumerate(self._dl_task_slots):
-            if idx < len(display_tasks):
-                task = display_tasks[idx]
-                slot["id_label"].config(text=task.work_id)
-                slot["title_label"].config(text=task.title[:20])
+            if idx < len(active_tasks):
+                task = active_tasks[idx]
+                slot["id_label"].config(text=task.work_id[:12])
 
-                slot["pbar"].pack_forget()
-                slot["pct_label"].pack_forget()
-                slot["speed_label"].pack_forget()
-                slot["done_label"].pack_forget()
-                slot["fail_label"].pack_forget()
-                slot["retry_btn"].pack_forget()
-                slot["queued_label"].pack_forget()
+                if task.total_bytes > 0:
+                    pct = min(int(task.completed_bytes * 100 / task.total_bytes), 100)
+                    slot["pct_label"].config(text=f"{pct}%")
+                elif task.status.value == "submitting":
+                    slot["pct_label"].config(text="提交中")
+                elif task.total_files > 0:
+                    slot["pct_label"].config(text="下载中")
+                else:
+                    slot["pct_label"].config(text="...")
 
-                if task.status.value in ("submitting", "downloading"):
-                    slot["pbar"].pack(side=tk.LEFT, padx=(0, 5))
-                    slot["pct_label"].pack(side=tk.LEFT)
+                if task.speed > 0:
+                    slot["speed_label"].config(text=self._format_speed(task.speed))
+                else:
+                    slot["speed_label"].config(text="")
 
-                    if task.total_bytes > 0:
-                        pct = min(int(task.completed_bytes * 100 / task.total_bytes), 100)
-                        slot["pbar"]["value"] = pct
-                        slot["pct_label"].config(text=f"{pct}%")
-                    else:
-                        slot["pbar"]["value"] = 0
-                        slot["pct_label"].config(text="...")
-
-                    if task.speed > 0:
-                        slot["speed_label"].config(text=self._format_speed(task.speed))
-                        slot["speed_label"].pack(side=tk.LEFT, padx=(5, 0))
-                elif task.status.value == "queued":
-                    slot["queued_label"].pack(side=tk.LEFT)
-                    queue_pos = queued_tasks.index(task) + 1 if task in queued_tasks else 0
-                    slot["queued_label"].config(text=f"排队中 ({queue_pos})")
-                elif task.status.value == "failed":
-                    slot["fail_label"].pack(side=tk.LEFT, padx=(0, 5))
-                    slot["retry_btn"].config(command=lambda wid=task.work_id: self._retry_download(wid))
-                    slot["retry_btn"].pack(side=tk.LEFT)
-                elif task.status.value == "completed":
-                    slot["pbar"].pack(side=tk.LEFT, padx=(0, 5))
-                    slot["pbar"]["value"] = 100
-                    slot["pct_label"].pack(side=tk.LEFT)
-                    slot["pct_label"].config(text="100%")
-                    slot["done_label"].pack(side=tk.LEFT, padx=(5, 0))
-
-                slot["frame"].grid(pady=1)
+                if not slot["_visible"]:
+                    slot["frame"].grid(pady=1)
+                    slot["_visible"] = True
             else:
-                slot["frame"].grid_remove()
+                if slot["_visible"]:
+                    slot["frame"].grid_remove()
+                    slot["_visible"] = False
 
     def _retry_download(self, work_id):
         success = self.dl_manager.retry(work_id)
@@ -996,6 +953,9 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
 
     def open_settings(self):
         self._settings_win = SettingsWindow(self.root, image_cache=self.image_cache)
+
+    def open_download_manager(self):
+        DownloadManagerWindow(self.root, self.dl_manager)
 
 
 if __name__ == "__main__":

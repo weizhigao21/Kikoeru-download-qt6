@@ -64,6 +64,14 @@ class DownloadManager:
         self._queue_mode = False
         self._pending_db = None
 
+        # 低速自动重启配置
+        import src.config as _cfg
+        self._SLOW_SPEED_THRESHOLD = _cfg.SLOW_SPEED_THRESHOLD * 1024 * 1024   # MB/s -> bytes/s
+        self._SLOW_SPEED_DURATION = _cfg.SLOW_SPEED_DURATION                    # 秒
+        self._slow_speed_tracker: dict[str, float] = {}                        # work_id -> 首次低速时间戳
+        self._slow_restart_count: dict[str, int] = {}                         # work_id -> 已重启次数
+        self._MAX_SLOW_RESTARTS = _cfg.MAX_SLOW_RESTARTS                      # 单任务最大自动重启次数
+
         # 内存管理配置
         self._MAX_COMPLETED_TASKS = 100  # 保留最近100条已完成任务用于显示
         self._MAX_TOTAL_TASKS = 200     # 任务总数上限
@@ -229,6 +237,11 @@ class DownloadManager:
                 task.total_bytes = 0
                 task.completed_bytes = 0
             self._sync_task_status(task)
+
+        if task.status == TaskStatus.DOWNLOADING:
+            self._check_slow_speed(task)
+        elif task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            self._slow_speed_tracker.pop(task.work_id, None)
             self._notify_observers()
             return
 
@@ -436,6 +449,10 @@ class DownloadManager:
                     task.completed_at = time.time()
         if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             self._sync_task_status(task)
+            self._slow_speed_tracker.pop(task.work_id, None)
+
+        if task.status == TaskStatus.DOWNLOADING:
+            self._check_slow_speed(task)
 
     def _poll_aria2_task(self, task):
         old_gids_count = len(task.gids)
@@ -521,6 +538,11 @@ class DownloadManager:
                             task.status = TaskStatus.FAILED
         self._sync_task_status(task)
 
+        if task.status == TaskStatus.DOWNLOADING:
+            self._check_slow_speed(task)
+        elif task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            self._slow_speed_tracker.pop(task.work_id, None)
+
     def _retry_task(self, task):
         import random
 
@@ -548,6 +570,56 @@ class DownloadManager:
             return poll_download_progress(task.gids)
         except Exception:
             return 0, 0, 0, True
+
+    def _check_slow_speed(self, task):
+        wid = task.work_id
+        if task.speed >= self._SLOW_SPEED_THRESHOLD:
+            self._slow_speed_tracker.pop(wid, None)
+            return
+        now = time.time()
+        if wid not in self._slow_speed_tracker:
+            self._slow_speed_tracker[wid] = now
+            return
+        slow_duration = now - self._slow_speed_tracker[wid]
+        if slow_duration < self._SLOW_SPEED_DURATION:
+            return
+        restart_count = self._slow_restart_count.get(wid, 0)
+        if restart_count >= self._MAX_SLOW_RESTARTS:
+            print(f"[低速重启] {wid} 已达最大重启次数 ({self._MAX_SLOW_RESTARTS})，不再自动重启")
+            self._slow_speed_tracker.pop(wid, None)
+            return
+        print(f"[低速重启] {wid} 低速持续 {slow_duration:.0f}s (速度: {task.speed / 1024:.0f} KB/s)，自动重启 (第{restart_count + 1}次)")
+        self._slow_speed_tracker.pop(wid, None)
+        self._slow_restart_count[wid] = restart_count + 1
+        threading.Thread(target=self._auto_restart_slow_task, args=(task,), daemon=True).start()
+
+    def _auto_restart_slow_task(self, task):
+        with self._tasks_lock:
+            current = self.tasks.get(task.work_id)
+            if not current or current.status != TaskStatus.DOWNLOADING:
+                return
+        if task.download_method == "aria2":
+            from .downloader import remove_aria2_downloads, purge_aria2_downloads
+            remove_aria2_downloads(task.gids)
+            purge_aria2_downloads()
+        else:
+            from .downloader_direct import _progress_lock, _download_progress
+            with _progress_lock:
+                for tid in list(task.direct_task_ids):
+                    p = _download_progress.get(tid, {})
+                    if p.get("status") not in ("complete", "error", "cancelled"):
+                        _download_progress[tid] = {
+                            **p, "status": "cancelled"
+                        }
+        with self._tasks_lock:
+            task.gids.clear()
+            task.direct_task_ids.clear()
+            task.total_bytes = 0
+            task.completed_bytes = 0
+            task.speed = 0
+            task.status = TaskStatus.SUBMITTING
+        self._persist_task(task)
+        self._submit_task(task.work, task.files, task)
 
     def _housekeeping(self, work):
         try:

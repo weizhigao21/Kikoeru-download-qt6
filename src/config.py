@@ -28,6 +28,9 @@ _DEFAULT_CONFIG = {
     "ai_model": "gpt-3.5-turbo",
     "ai_translate_editable": True,
     "filename_filter_chars": "",
+    "slow_speed_threshold": 1,
+    "slow_speed_duration": 10,
+    "max_slow_restarts": 3,
 }
 
 
@@ -41,7 +44,7 @@ _APP_ROOT = _get_app_root()
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.32.0"
+VERSION = "v1.33.0"
 
 _cfg = {}
 try:
@@ -86,3 +89,6 @@ DIRECT_DOWNLOAD_THREADS = _cfg.get("direct_download_threads", 3)
 QUEUE_MODE = _cfg.get("queue_mode", False)
 MAX_CONCURRENT_DOWNLOADS = _cfg.get("max_concurrent_downloads", 1)
 FILENAME_FILTER_CHARS = _cfg.get("filename_filter_chars", "")
+SLOW_SPEED_THRESHOLD = _cfg.get("slow_speed_threshold", 1)
+SLOW_SPEED_DURATION = _cfg.get("slow_speed_duration", 10)
+MAX_SLOW_RESTARTS = _cfg.get("max_slow_restarts", 3)

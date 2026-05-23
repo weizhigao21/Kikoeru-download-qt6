@@ -11,3 +11,4 @@ from .database.cache import ImageCacheManager, get_http_session
 from .download.downloader import get_downloader
 from .ui.gui_download import DownloadWindow
 from .ui.gui_settings import SettingsWindow
+from .ui.gui_download_manager import DownloadManagerWindow
