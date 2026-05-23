@@ -477,16 +477,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.hide_loading()
         self.refresh_btn.config(state=tk.NORMAL)
 
-        # 2. 批量更新列表和详情（禁用重绘）
-        self.canvas.config(cursor="watch")
-        self.root.config(cursor="watch")
-
+        # 2. 批量更新列表和详情
         try:
             self.display_works_list()
             self.show_work_detail(0)
-        finally:
-            self.cursor = ""
-            self.root.config(cursor="")
+        except Exception as e:
+            logger.error("_batch_ui_update 异常: %s", e)
 
         # 3. 最后更新按钮状态
         self.update_buttons()
