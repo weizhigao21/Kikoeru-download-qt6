@@ -9,7 +9,7 @@ from collections import OrderedDict
 
 logger = logging.getLogger('cache')
 
-_thread_local = threading.local
+_thread_local = threading.local()
 
 
 def get_http_session():
