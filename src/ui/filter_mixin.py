@@ -1,5 +1,5 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 
 from ..api_client import get_api_client
 
@@ -158,41 +158,41 @@ class FilterMixin:
 
         for batch_start in range(0, total, batch_size):
             batch = missing_items[batch_start:batch_start + batch_size]
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = {executor.submit(fetch_one, item): item for item in batch}
-                for future in as_completed(futures):
-                    rj_id, thumb_url, main_url, tags, vas, circle, other_editions = future.result()
-                    self._fetched_ids.add(rj_id)
-                    
-                    if thumb_url is None:
-                        continue
-                    
-                    tag_names = extract_tags(tags) if tags else []
-                    
-                    self.download_history.update_work_detail(
-                        rj_id,
-                        thumbnail_url=thumb_url or None,
-                        main_cover_url=main_url or None,
-                        tags=tag_names or None,
-                        vas=vas or None,
-                        circle_data=circle or None,
-                        other_editions=other_editions or None
-                    )
-                    saved += 1
-                    for work in self._all_downloaded_works:
-                        if work.get("source_id") == rj_id:
-                            if thumb_url:
-                                work["thumbnailCoverUrl"] = thumb_url
-                                work["mainCoverUrl"] = main_url
-                            if tags:
-                                work["tags"] = tags
-                            if vas:
-                                work["vas"] = vas
-                            if circle:
-                                work["circle"] = circle
-                            if other_editions:
-                                work["other_language_editions_in_db"] = other_editions
-                            break
+            executor = self._data_pool
+            futures = {executor.submit(fetch_one, item): item for item in batch}
+            for future in as_completed(futures):
+                rj_id, thumb_url, main_url, tags, vas, circle, other_editions = future.result()
+                self._fetched_ids.add(rj_id)
+                
+                if thumb_url is None:
+                    continue
+                
+                tag_names = extract_tags(tags) if tags else []
+                
+                self.download_history.update_work_detail(
+                    rj_id,
+                    thumbnail_url=thumb_url or None,
+                    main_cover_url=main_url or None,
+                    tags=tag_names or None,
+                    vas=vas or None,
+                    circle_data=circle or None,
+                    other_editions=other_editions or None
+                )
+                saved += 1
+                for work in self._all_downloaded_works:
+                    if work.get("source_id") == rj_id:
+                        if thumb_url:
+                            work["thumbnailCoverUrl"] = thumb_url
+                            work["mainCoverUrl"] = main_url
+                        if tags:
+                            work["tags"] = tags
+                        if vas:
+                            work["vas"] = vas
+                        if circle:
+                            work["circle"] = circle
+                        if other_editions:
+                            work["other_language_editions_in_db"] = other_editions
+                        break
             _progress['done'] = min(batch_start + batch_size, total)
             if batch_start + batch_size < total:
                 self.root.after(0, _throttled_progress)

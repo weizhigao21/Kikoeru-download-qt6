@@ -5,6 +5,7 @@ import time
 import os
 import sys
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(threadName)s: %(message)s')
 logger = logging.getLogger('gui_app')
@@ -53,6 +54,8 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.current_work_index = -1
 
         self.image_cache = ImageCacheManager(CACHE_DIR, MEMORY_CACHE_SIZE)
+        self._thumb_pool = ThreadPoolExecutor(max_workers=8)
+        self._data_pool = ThreadPoolExecutor(max_workers=4)
         self.db = DatabaseManager(DB_PATH)
         self.download_history = DownloadHistoryManager(DOWNLOAD_HISTORY_DB_PATH)
         self.pending_task_db = PendingTaskManager(DOWNLOAD_HISTORY_DB_PATH)
@@ -279,6 +282,7 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
 
         self.dl_task_frame = tk.Frame(bottom_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
         self.dl_task_frame.grid(row=0, column=1, sticky="w")
+        self._dl_mgr_win = None
         self._dl_task_slots = []
         for i in range(1):
             slot = self._create_task_slot()
@@ -848,6 +852,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         tasks = self.dl_manager.get_all_tasks()
         active_tasks = [t for t in tasks if t.status.value in ("submitting", "downloading")]
 
+        while len(self._dl_task_slots) < len(active_tasks):
+            new_slot = self._create_task_slot()
+            new_slot["frame"].grid(row=len(self._dl_task_slots), column=0, sticky="ew", pady=1)
+            new_slot["frame"].grid_remove()
+            self._dl_task_slots.append(new_slot)
+
         for idx, slot in enumerate(self._dl_task_slots):
             if idx < len(active_tasks):
                 task = active_tasks[idx]
@@ -915,6 +925,13 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
         self.root.bind("<Escape>", lambda e: self._on_escape())
         self.root.bind("<Left>", lambda e: self._shortcut_prev())
         self.root.bind("<Right>", lambda e: self._shortcut_next())
+        self.root.bind("<Control-d>", lambda e: self._shortcut_download())
+        self.root.bind("<Control-D>", lambda e: self._shortcut_download())
+        self.root.bind("<Return>", lambda e: self._shortcut_download())
+        self.root.bind("<Up>", lambda e: self._shortcut_select_prev())
+        self.root.bind("<Down>", lambda e: self._shortcut_select_next())
+        self.root.bind("<Next>", lambda e: self.next_page())
+        self.root.bind("<Prior>", lambda e: self.prev_page())
 
     def _focus_search(self):
         self.search_entry.focus_set()
@@ -951,11 +968,54 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin):
             return
         self.next_page()
 
+    def _shortcut_download(self):
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Entry):
+            return
+        if self.current_work_index >= 0 and self.current_work_index < len(self.works):
+            display_title = self._get_display_title(self.current_work_index)
+            self.open_download_window(self.works[self.current_work_index], display_title)
+        return "break"
+
+    def _shortcut_select_prev(self):
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Entry):
+            return
+        if self.works and self.current_work_index > 0:
+            self.show_work_detail(self.current_work_index - 1)
+        return "break"
+
+    def _shortcut_select_next(self):
+        widget = self.root.focus_get()
+        if isinstance(widget, tk.Entry):
+            return
+        if self.works and self.current_work_index < len(self.works) - 1:
+            self.show_work_detail(self.current_work_index + 1)
+        return "break"
+
     def open_settings(self):
         self._settings_win = SettingsWindow(self.root, image_cache=self.image_cache)
 
     def open_download_manager(self):
-        DownloadManagerWindow(self.root, self.dl_manager)
+        if self._dl_mgr_win is not None:
+            try:
+                if self._dl_mgr_win.winfo_exists():
+                    self._dl_mgr_win.lift()
+                    self._dl_mgr_win.focus_force()
+                    return
+            except Exception:
+                pass
+            self._dl_mgr_win = None
+
+        win = DownloadManagerWindow(self.root, self.dl_manager)
+        self._dl_mgr_win = win.window
+        original_close = win._on_close
+
+        def _on_close_wrapper():
+            original_close()
+            self._dl_mgr_win = None
+
+        win._on_close = _on_close_wrapper
 
 
 if __name__ == "__main__":

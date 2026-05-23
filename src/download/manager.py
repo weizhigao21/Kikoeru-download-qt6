@@ -335,7 +335,7 @@ class DownloadManager:
                 if i < len(file_list) - 1:
                     time.sleep(2)
 
-        batch_size = max(1, len(files_to_download) // max_threads)
+        batch_size = max(1, (len(files_to_download) + max_threads - 1) // max_threads)
         batches = []
         for i in range(0, len(files_to_download), batch_size):
             batches.append(files_to_download[i:i + batch_size])

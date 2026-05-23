@@ -288,6 +288,16 @@ class DownloadHistoryManager:
                     pass
                 self._local.conn = None
 
+    @staticmethod
+    def _safe_json_load(s, default=None):
+        if not s:
+            return default if default is not None else ([] if default == [] else {})
+        try:
+            data = json.loads(s)
+            return data if isinstance(data, (list, dict)) else (default or [])
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else []
+
     def _init_db(self):
         with self._connect() as conn:
             cursor = conn.cursor()

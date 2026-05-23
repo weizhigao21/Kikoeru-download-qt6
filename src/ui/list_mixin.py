@@ -1,14 +1,24 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import font as tkfont
 import threading
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import ImageTk
 
 from .. import config as _config
 from ..services.translator import get_translator
 
 logger = logging.getLogger('list_mixin')
+
+_TAG_FONT = None
+
+
+def _get_tag_font():
+    global _TAG_FONT
+    if _TAG_FONT is None:
+        _TAG_FONT = tkfont.Font(family="Microsoft YaHei UI", size=9)
+    return _TAG_FONT
 
 
 class ListMixin:
@@ -229,15 +239,13 @@ class ListMixin:
                 cw = 480
         TAG_COLORS = ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0", "#E91E63",
                        "#00BCD4", "#8BC34A", "#FF5722"]
+        tag_font = _get_tag_font()
         x, y = 2, 2
         row_height = 26
         max_width = cw - 4
         for idx, tag in enumerate(tags[:12]):
             color = TAG_COLORS[idx % len(TAG_COLORS)]
-            text_id = canvas.create_text(0, 0, text=tag, font=("Microsoft YaHei UI", 9), anchor="nw")
-            bbox = canvas.bbox(text_id)
-            tw = bbox[2] - bbox[0] + 12
-            canvas.delete(text_id)
+            tw = tag_font.measure(tag) + 12
             if idx > 0 and x + tw > max_width:
                 x = 2
                 y += row_height
@@ -497,10 +505,6 @@ class ListMixin:
             slot = self._card_slots[idx]
             slot['frame'].pack(fill=tk.X, padx=5, pady=5)
 
-        logger.debug("display_works_list 调用 update_idletasks")
-        self.root.update_idletasks()
-        logger.debug("display_works_list update_idletasks 完成")
-
         for idx, work in enumerate(self.works):
             slot = self._card_slots[idx]
             thumb_url = self._update_slot(slot, idx, work)
@@ -521,8 +525,7 @@ class ListMixin:
 
     def _load_thumbnails_batch(self, items):
         gen = getattr(self, '_nav_generation', 0)
-        executor = ThreadPoolExecutor(max_workers=8)
-        results = []
+        executor = self._thumb_pool
 
         def load_one(slot, url, idx):
             if getattr(self, '_nav_generation', 0) != gen:
@@ -535,29 +538,24 @@ class ListMixin:
                 pass
             return None
 
-        futures = [executor.submit(load_one, slot, url, idx) for slot, url, idx in items]
-        for future in futures:
+        future_map = {executor.submit(load_one, slot, url, idx): (slot, url)
+                      for slot, url, idx in items}
+
+        for future in as_completed(future_map):
             result = future.result()
-            if result:
-                results.append(result)
-        executor.shutdown(wait=False)
+            if result and getattr(self, '_nav_generation', 0) == gen:
+                self.root.after(0, self._update_single_thumbnail, *result)
 
-        if results and getattr(self, '_nav_generation', 0) == gen:
-            self.root.after(0, self._batch_update_thumbnails, results)
-
-    def _batch_update_thumbnails(self, results):
-        colors = getattr(self, 'COLORS', {
-            "border": "#e0e0e0",
-        })
-        for slot, pil_img, url in results:
-            try:
-                if slot['img_label'].winfo_exists():
-                    photo = ImageTk.PhotoImage(pil_img)
-                    slot['img_label'].config(image=photo, text="", bg=colors["border"])
-                    slot['img_label'].image = photo
-                    self.image_cache.memory_cache.put(f"thumb_{url}", photo)
-            except Exception:
-                pass
+    def _update_single_thumbnail(self, slot, pil_img, url):
+        colors = getattr(self, 'COLORS', {"border": "#e0e0e0"})
+        try:
+            if slot['img_label'].winfo_exists():
+                photo = ImageTk.PhotoImage(pil_img)
+                slot['img_label'].config(image=photo, text="", bg=colors["border"])
+                slot['img_label'].image = photo
+                self.image_cache.memory_cache.put(f"thumb_{url}", photo)
+        except Exception:
+            pass
 
     def _update_thumbnail(self, img_label, img):
         try:

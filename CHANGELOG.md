@@ -1,5 +1,16 @@
 # 更新日志
 
+## v1.34.0
+- **优化**：移除列表渲染阻塞 — `display_works_list` 中移除 `update_idletasks()` 强制同步刷新调用，列表渲染不再阻塞主线程，页面切换流畅度明显提升
+- **优化**：标签绘制性能 — `_draw_tags_on_canvas` 使用 `tkfont.Font.measure()` 预计算文本宽度，替代每标签创建/删除 Canvas 对象的测宽方式，减少约 100 次/页的 GC 压力
+- **优化**：缩略图流式加载 — `_load_thumbnails_batch` 改用 `as_completed` 流式处理，图片加载完一张即刻显示一张，不再等全部完成后统一刷新
+- **优化**：共享线程池 — `WorkApp` 初始化时创建全局 `_thumb_pool`（8线程）和 `_data_pool`（4线程），列表和筛选模块复用现有线程池，避免每次翻页都创建/销毁 `ThreadPoolExecutor`
+- **优化**：直接下载线程分派 — `batch_size` 从整数除法改为 ceil 除法 `(n + max - 1) // max`，确保恰好创建 `max_threads` 个线程充分利用并行能力
+- **优化**：下载管理窗口单例 — `open_download_manager` 增加已存在窗口检测，重复点击时置顶聚焦而非创建新窗口；窗口关闭时自动清理引用
+- **新增**：快捷键扩展 — `Ctrl+D` / `Enter` 打开当前作品下载窗口，`Up` / `Down` 切换列表选中作品（右侧详情同步更新），`PageUp` / `PageDown` 翻页
+- **新增**：动态下载进度条 — 底部下载栏按需创建任务槽位，同时显示所有并行下载任务的进度，不再限制为 1 个
+- **修复**：`DownloadHistoryManager._safe_json_load` 缺失 — `get_all_downloaded_works_full` 调用 `_safe_json_load` 时因方法仅定义在 `DatabaseManager` 上导致崩溃，已在 `DownloadHistoryManager` 类补充静态方法
+
 ## v1.33.0
 - **新增**：下载管理窗口 — 新增 `DownloadManagerWindow` 独立窗口，底部栏「下载管理」按钮打开；上下按钮切换「正在下载」和「已完成」两个区域；正在下载区横排显示状态/ID/名称/进度条/速度，已完成区简洁显示ID/名称+✓
 - **新增**：低速自动重启 — 下载速度持续低于阈值（默认 1MB/s）超过设定时间（默认 10秒）时自动取消并重新提交任务（支持断点续传接续），单任务最多自动重启 3 次；可通过 `config.json` 的 `slow_speed_threshold`、`slow_speed_duration`、`max_slow_restarts` 配置
