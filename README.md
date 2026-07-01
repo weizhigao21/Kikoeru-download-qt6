@@ -1,10 +1,10 @@
-# 音声作品浏览下载
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
 
 一个基于 Tkinter 的桌面应用程序，用于浏览和下载 ASMR 音声作品。
 
 ## 版本
 
-**v1.35.0**（当前版本）
+**v1.50.0**（当前版本）
 
 ## 功能特性
 
@@ -49,7 +49,7 @@
 - **下载失败重试**：下载失败（429 限流等）自动重试，最多 3 次，指数退避等待
 - **真实进度显示**：全局轮询实时进度，底部显示每个任务的进度条、百分比、速度
 - **下载历史**：记录已下载作品，支持分页浏览和多种排序
-- **下载作品列表**：下拉框"下载作品"tab 直接浏览所有已下载作品，支持排序和分页，切换 tab 时自动缓存避免重复查询
+- **下载作品列表**：下拉框"下载作品"tab 直接浏览所有已下载作品，支持排序和分页，切换 tab 时自动缓存避免重复查询，支持"扫描关联"批量获取多语言版本信息
 - **懒下载标记**：点击下载即标记已下载状态，无需等待任务提交完成
 - **文件名字符过滤**：设置窗口支持自定义额外过滤字符（如 `【】「」《》…`），与 Windows 非法字符合并处理，避免下载目录名包含特殊字符
 - **下载任务持久化**：未完成的下载任务（提交中/下载中/排队中/失败）自动保存到数据库，程序重启后自动恢复，失败任务可点击重试继续下载
@@ -57,6 +57,14 @@
 - **下载管理窗口**：独立窗口查看所有下载任务，分「正在下载」和「已完成」两个区域，支持重试/取消操作，实时进度更新
 - **低速自动重启**：下载速度持续低于阈值时自动暂停并重新提交任务（利用断点续传接续），可配置阈值/时长/最大重启次数
 - **UI 无闪烁刷新**：下载管理窗口和底部栏均采用增量更新策略，仅在任务列表变化时重建控件，进度更新只改文字值
+- **自动标记其他语言版本**：下载作品时自动将其所有其他语言版本标记为已下载，后续发现新版本时也会自动标记
+- **VTT 字幕自动转换**：下载完成后自动将 VTT 字幕文件转换为 LRC 格式，可在设置中开关
+- **字幕转换状态**：字幕转换期间显示「字幕转换中」状态，转换完成后再标记为已完成
+- **文件夹自动整理**：所有下载任务全部完成后，自动将多层嵌套子文件夹扁平化，只保留最后一层，移动失败自动重试 3 次
+- **下载失败自动重试**：直接下载模式下部分文件失败时自动重试（最多 3 次），全部成功后才标记完成
+- **进度条线程安全**：进度更新通过主线程调度，避免 UI 崩溃；支持一位小数显示（如 45.3%）
+- **底部进度框动态显隐**：底部下载任务进度框仅在有活跃下载任务时显示，无任务时自动隐藏
+- **多语言版本关联标记**：列表卡片和详情面板中其他语言版本标签显示下载状态（绿色 ✓ 表示已下载），已下载 Tab 支持批量扫描关联
 
 ### 性能优化
 - **数据库连接超时管理**：连接 5 分钟未使用自动关闭，启用 WAL 模式提升并发性能 2-3 倍，自动事务管理（commit/rollback）
@@ -100,17 +108,17 @@
 - `src/ui/list_mixin.py` / `src/ui/list_card.py` — 作品列表（缩略图加载、加载动画、滚动、canvas管理）+ 卡片（创建、标签渲染、AI翻译交互）
 - `src/ui/search_mixin.py` — 统一搜索（ID/标签/关键词、搜索框标签芯片）
 - `src/ui/filter_mixin.py` — 筛选排序（只看已下载、内存排序、封面补全）
-- `gui_app_ui.py` / `gui_app_nav.py` / `gui_app_events.py` — 主窗口 Mixin（`UISetupMixin` 样式/UI构建、`NavigationMixin` 数据加载/分页、`EventMixin` 搜索历史/快捷键）
+- `src/gui_app_ui.py` / `src/gui_app_nav.py` / `src/gui_app_events.py` — 主窗口 Mixin（`UISetupMixin` 样式/UI构建、`NavigationMixin` 数据加载/分页、`EventMixin` 搜索历史/快捷键）
 - `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
 - `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、翻译缓存）
 - 通过 Mixin 多继承组合到 WorkApp，MRO：`WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin`
 
 ```
 g:\code\音声下载\
-├── gui_app.py                  # 主程序入口（Mixin模式组合，核心类 + 工具方法）
-├── gui_app_ui.py               # UISetupMixin（样式配置、UI构建、下载任务显示）
-├── gui_app_nav.py              # NavigationMixin（数据加载、分页导航、按钮状态管理）
-├── gui_app_events.py           # EventMixin（搜索历史、键盘快捷键、鼠标滚轮事件）
+├── src/gui_app.py              # 主程序入口（Mixin模式组合，核心类 + 工具方法）
+├── src/gui_app_ui.py           # UISetupMixin（样式配置、UI构建、下载任务显示）
+├── src/gui_app_nav.py          # NavigationMixin（数据加载、分页导航、按钮状态管理）
+├── src/gui_app_events.py       # EventMixin（搜索历史、键盘快捷键、鼠标滚轮事件）
 ├── src/                        # 核心业务模块包
 │   ├── __init__.py             # 统一导出
 │   ├── config.py               # 配置读取（带默认值容错）
@@ -174,7 +182,7 @@ pip install requests Pillow
 ## 运行方式
 
 ```bash
-python gui_app.py
+python src/gui_app.py
 ```
 
 ## 导入本地下载记录
@@ -253,13 +261,13 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 - `invert_selection()` - 反选所有节点
 - `expand_all()` / `collapse_all()` - 展开/折叠所有节点
 
-### WorkApp (gui_app.py + gui_app_ui.py + gui_app_nav.py + gui_app_events.py)
+### WorkApp (src/gui_app.py + src/gui_app_ui.py + src/gui_app_nav.py + src/gui_app_events.py)
 主应用程序类，通过 Mixin 多继承组合功能模块（拆分为 4 个文件，总行数从 891 行降至各文件均 ≤ 366 行）：
 
-- **gui_app.py**（167行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`main` 入口
-- **gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 全部控件构建、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理
-- **gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航、`update_buttons()` 按钮状态、`refresh_data()` 数据刷新
-- **gui_app_events.py**（142行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航、`_bind_shortcuts()` 全局快捷键绑定、`_on_mouse_wheel()` 滚轮事件、`_on_escape()` ESC 清除搜索
+- **src/gui_app.py**（272行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`main` 入口
+- **src/gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 全部控件构建、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理
+- **src/gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航、`update_buttons()` 按钮状态、`refresh_data()` 数据刷新
+- **src/gui_app_events.py**（142行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航、`_bind_shortcuts()` 全局快捷键绑定、`_on_mouse_wheel()` 滚轮事件、`_on_escape()` ESC 清除搜索
 
 Mixin 继承链（MRO 从左到右，深度优先）：
 ```
@@ -385,63 +393,9 @@ WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMix
 
 ## 已知问题与改进计划
 
-### 🐛 已知Bug
+历史修复和优化记录已迁移至 [CHANGELOG.md](CHANGELOG.md)。
 
-#### 已修复（v1.12.0）
-1. ✅ **下载进度查询竞态条件** — 改为先收集待删除 GID 再统一删除
-2. ✅ **数据库连接泄漏** — 全部方法改用 `contextmanager` 确保连接关闭
-3. ✅ **内存泄漏风险** — 图片缓存添加磁盘空间管理（默认 500MB 上限）
-4. ✅ **`is_downloaded()` 性能问题** — 从全表加载改为 SQL 直接查询
-5. ✅ **裸 `except:` 语句** — 全部改为 `except Exception:`
-6. ✅ **`ImageCacheManager` 缺失方法** — 恢复 `get()`、`get_http_session()` 等被误删的方法
-7. ✅ **详情页图片尺寸错误** — 详情页现在正确加载 400×400 高清封面（mainCoverUrl），不再显示 180×180 缩略图
-8. ✅ **mainCoverUrl 未持久化** — 懒加载获取的高清封面 URL 现在写入数据库，切换时不再重复请求
-9. ✅ **声优/厂商重复请求** — 懒加载前先查询本地数据库（works.db + download_history.db），命中则跳过 API
-10. ✅ **设置窗口缺少缓存管理** — 新增缓存大小显示和"清除缓存"按钮
-
-#### 已修复（v1.12.1）
-1. ✅ **线程安全问题** — `ImageTk.PhotoImage` 改为主线程创建（新增 `_load_pil_from_url` 方法），`StringVar.get()` 改为主线程读取后传参
-2. ✅ **标签换行计算不准确** — `_draw_tags_on_canvas` 改为基于 Canvas 实际宽度自适应换行，不再使用固定数量
-
-#### 已修复（v1.13.1）
-1. ✅ **翻页到第3页程序卡死** — `LRUCache.put()` 使用阻塞锁获取（`with self.lock`），后台 8 个 ThreadPoolExecutor 线程频繁竞争锁时，主线程被永久阻塞。修复：`LRUCache` 的 `get()`、`put()`、`remove()` 全部改为非阻塞锁获取（`acquire(blocking=False)`），获取不到锁时跳过缓存操作，绝不阻塞主线程
-2. ✅ **`_on_tab_changed` loading 状态永久锁定** — loading 状态下切换 tab 被拦截 return 后，`self.loading` 永远不会被重置，导致所有后续翻页静默失效。修复：拦截时将 `tab_var` 恢复为当前 tab
-3. ✅ **`show_loading()`/`hide_loading()` 控件安全性** — 快速翻页时 loading 控件被销毁后仍被访问，引发 TclError。修复：销毁前调用 `winfo_exists()` 检查 + `Progressbar.stop()` 停止内部定时器
-4. ✅ **`_InFlight.dedup()` 竞态条件** — 两个线程同时调用 `dedup()` 时，第二个线程没有等待第一个线程完成，导致同一个 API 被请求两次，两个回调先后执行造成界面状态混乱。修复：使用 `evt.wait()` 等待 + `_results` 缓存结果
-
-#### 已修复（v1.27.0）
-1. ✅ **下载作品重复加载 API 补全信息** — `update_work_detail` 方法更新数据库时 RJ ID 格式不匹配（带 RJ 前缀更新纯数字 ID），导致声优/厂商信息永远写不进去。修复为使用规范化后的 ID 进行 WHERE 条件匹配
-2. ✅ **下载作品缓存频繁失效** — `_on_dl_tasks_changed` 改为仅在下任务完成或失败时使缓存失效，进度更新不再触发缓存失效，避免频繁重新加载
-3. ✅ **作品信息完整性误判** — 空声优数组 `[]` 和空厂商字典 `{}` 视为"已获取"而非"缺失"，避免对本身无此信息的作品重复请求 API
-4. ✅ **作品缓存初始化优化** — `_load_downloaded_works` 在加载后立即根据数据库中的完整信息初始化 `_fetched_ids`，减少不必要的 API 请求
-
-#### 已修复（v1.35.0）
-1. ✅ **「隐藏下载」翻页过滤失效** — 启用「隐藏下载」后翻页（或搜索翻页）时新页数据未重新应用过滤器，导致已下载作品重新出现。修复 `_on_data_loaded` 和标签/关键词/厂商搜索成功回调共 4 条路径，数据加载完成后统一检查 `show_downloaded` 状态并过滤，状态栏同步显示过滤后数量
-
-#### 待修复
-暂无
-
-### ⚡ 性能优化建议
-
-#### 已完成（v1.14.0）
-- ✅ **全局下载管理器**：`DownloadManager` 单例统一管理所有下载任务，支持多作品并行下载
-- ✅ **下载窗口解耦**：去掉轮询/回调/转移逻辑，窗口仅负责文件选择和提交
-- ✅ **底部任务列表**：从单一进度条改为多行任务列表，固定槽位 + grid 布局消除闪烁
-- ✅ **多标签搜索修复**：`_encode_tags` 分隔符从 `$` 改为空格，多标签搜索不再返回 0 结果
-- ✅ **数据库路径自定义**：`config.json` 新增 `db_dir` 配置项，设置窗口支持浏览和迁移
-- ✅ **UI 更新优化**：任务列表更新时复用控件只改数值，不再销毁重建
-
-#### 已完成（v1.13.0）
-- ✅ **添加索引优化**：`works.work_id`、`works.page`、`download_history.rj_id`、`download_history.created_at`
-- ✅ **添加 API 请求缓存**：LRU 缓存，最多 100 条，TTL 120 秒
-- ✅ **Session 连接复用**：API 请求使用 `requests.Session` 复用 TCP 连接
-- ✅ **图片压缩保存**：保存时自动压缩为 JPEG 85% 质量
-- ✅ **磁盘缓存清理**：超 500MB 自动删除最旧文件
-- ✅ **数据库连接池**：`threading.local()` 缓存每线程连接，避免频繁创建/销毁
-- ✅ **请求合并**：API 请求增加进行中请求去重（`_InFlight`），避免重复请求
-- ✅ **批量更新**：移除 `update_idletasks()` 强制刷新、进度更新改用共享可变状态节流
-
-#### 待优化
+### 待优化
 - **虚拟滚动**：只渲染可见区域的列表项
 
 ### 🏗️ 架构改进方案

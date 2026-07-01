@@ -1,8 +1,12 @@
 import tkinter as tk
 from tkinter import font as tkfont
+import logging
+import time
 
 from .. import config as _config
 from ..services.translator import get_translator
+
+logger = logging.getLogger('list_card')
 
 _TAG_FONT = None
 
@@ -12,6 +16,23 @@ def _get_tag_font():
     if _TAG_FONT is None:
         _TAG_FONT = tkfont.Font(family="Microsoft YaHei UI", size=9)
     return _TAG_FONT
+
+
+def _hover_children(widget, from_bg, to_bg):
+    try:
+        wtype = widget.winfo_class()
+    except Exception:
+        return
+    if wtype in ("Button", "Canvas"):
+        return
+    if wtype in ("Frame", "Label"):
+        try:
+            if widget.cget("bg") == from_bg:
+                widget.config(bg=to_bg)
+        except Exception:
+            pass
+    for child in widget.winfo_children():
+        _hover_children(child, from_bg, to_bg)
 
 
 class ListCardMixin:
@@ -31,6 +52,17 @@ class ListCardMixin:
         })
 
         frame = tk.Frame(self.scrollable_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
+
+        def _on_enter(e, f=frame, c=colors):
+            f.config(bg=c["primary_light"])
+            for child in f.winfo_children():
+                _hover_children(child, c["card_bg"], c["primary_light"])
+        def _on_leave(e, f=frame, c=colors):
+            f.config(bg=c["card_bg"])
+            for child in f.winfo_children():
+                _hover_children(child, c["primary_light"], c["card_bg"])
+        frame.bind("<Enter>", _on_enter)
+        frame.bind("<Leave>", _on_leave)
         item_frame = tk.Frame(frame, bg=colors["card_bg"])
         item_frame.pack(fill=tk.X, padx=8, pady=8)
 
@@ -130,11 +162,10 @@ class ListCardMixin:
             return
         cw = canvas.winfo_width()
         if not cw or cw < 50:
-            try:
-                mw = canvas.master.winfo_width()
-                cw = mw if mw and mw >= 50 else 480
-            except Exception:
-                cw = 480
+            canvas.update_idletasks()
+            cw = canvas.winfo_width()
+        if not cw or cw < 50:
+            cw = 480
         TAG_COLORS = ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0", "#E91E63",
                        "#00BCD4", "#8BC34A", "#FF5722"]
         tag_font = _get_tag_font()
@@ -167,7 +198,7 @@ class ListCardMixin:
                 self.search_by_tag(tag)
                 return
 
-    def _update_slot(self, slot, idx, work):
+    def _update_slot(self, slot, idx, work, translations=None):
         slot['current_work'] = work
         title = work.get("title", "无标题")
 
@@ -190,7 +221,10 @@ class ListCardMixin:
         slot['copy_btn'].config(command=lambda sid=source_id: self.copy_to_clipboard(sid))
 
         work_id = str(work.get('id', ''))
-        cached_translated = self.db.get_translated_title(work_id)
+        if translations is not None:
+            cached_translated = translations.get(work_id, '')
+        else:
+            cached_translated = self.db.get_translated_title(work_id)
         if cached_translated:
             slot['translated_title'] = cached_translated
             slot['show_translated'] = True
@@ -244,9 +278,17 @@ class ListCardMixin:
             if edition.get('source_id'):
                 lang = edition.get('lang', '')
                 ed_id = edition.get('source_id', '')
+                ed_norm = self._normalize_rj_id(ed_id)
+                is_ed_downloaded = ed_norm in self.downloaded_ids_cache
+                if is_ed_downloaded:
+                    ed_text = f"✓{lang}:{ed_id}"
+                    ed_fg = "#2E7D32"
+                else:
+                    ed_text = f"{lang}:{ed_id}"
+                    ed_fg = "#9C27B0"
                 ed_label = tk.Label(slot['editions_container'],
-                                    text=f"{lang}:{ed_id}", font=("Microsoft YaHei UI", 8),
-                                    foreground="#9C27B0", bg=colors["card_bg"], anchor=tk.W, cursor="hand2")
+                                    text=ed_text, font=("Microsoft YaHei UI", 8),
+                                    foreground=ed_fg, bg=colors["card_bg"], anchor=tk.W, cursor="hand2")
                 ed_label.pack(side=tk.LEFT, padx=(2, 0))
                 ed_label._edition_sid = ed_id
                 ed_label.bind("<Button-1>", self._on_edition_click)
@@ -254,7 +296,7 @@ class ListCardMixin:
         slot['img_label'].config(image="", text="加载中", bg=colors["border"], fg=colors["text_hint"])
         thumbnail = work.get("thumbnailCoverUrl", "")
         if thumbnail:
-            cached = self.image_cache.get(thumbnail)
+            cached = self.image_cache.memory_cache.get(f"thumb_{thumbnail}")
             if cached:
                 slot['img_label'].config(image=cached, text="", bg=colors["border"])
                 slot['img_label'].image = cached
@@ -270,9 +312,58 @@ class ListCardMixin:
             self._apply_translation(slot, title, cached, work_id)
             return
 
-        slot['translate_btn'].config(text="...", state=tk.DISABLED)
+        current_text = slot['translate_btn'].cget('text')
+        if current_text != "翻译":
+            return
+
+        slot['translate_btn'].config(text="翻译中.", state=tk.DISABLED,
+                                     bg="#FFF3E0", fg="#E65100")
+        self._translation_dots = [".", "..", "..."]
+        self._translation_dot_index = 0
+
+        # 标记此翻译请求已发出，用于超时检测
+        slot['_translation_active'] = True
+        slot['_translation_start'] = time.time()
+
+        def animate_dots():
+            if not slot['translate_btn'].winfo_exists():
+                return
+            current = slot['translate_btn'].cget('text')
+            if not current.startswith("翻译中"):
+                return
+            self._translation_dot_index = (self._translation_dot_index + 1) % 3
+            slot['translate_btn'].config(text=f"翻译中{self._translation_dots[self._translation_dot_index]}")
+            self.root.after(500, animate_dots)
+
+        self.root.after(500, animate_dots)
+
+        # 超时保护：35 秒后如果仍在翻译中，自动恢复按钮状态
+        def on_timeout():
+            if not slot.get('_translation_active'):
+                return
+            if not slot['translate_btn'].winfo_exists():
+                return
+            current = slot['translate_btn'].cget('text')
+            if current.startswith("翻译中"):
+                slot['_translation_active'] = False
+                colors = getattr(self, 'COLORS', {"card_bg": "#ffffff", "success": "#4CAF50"})
+                slot['translate_btn'].config(text="翻译", state=tk.NORMAL,
+                                             bg=colors.get("card_bg", "#ffffff"), fg=colors.get("success", "#4CAF50"))
+                self.status_label.config(text="翻译超时，请检查网络或 API 设置", foreground="#f44336")
+                logger.warning(f"翻译超时: {title[:30]}...")
+
+        timeout_timer = self.root.after(35000, on_timeout)
+        slot['_translation_timeout_timer'] = timeout_timer
 
         def on_result(translated):
+            # 取消超时计时器
+            if slot.get('_translation_timeout_timer'):
+                try:
+                    self.root.after_cancel(slot['_translation_timeout_timer'])
+                except Exception:
+                    pass
+                slot['_translation_timeout_timer'] = None
+            slot['_translation_active'] = False
             self.root.after(0, self._on_translate_result, slot, title, translated, work_id)
 
         translator.translate(title, on_result)
@@ -283,30 +374,47 @@ class ListCardMixin:
                 return
             if translated:
                 self._apply_translation(slot, original, translated, work_id)
-                self.status_label.config(text="✓ 翻译完成", fg="#4CAF50")
+                self.status_label.config(text="✓ 翻译完成", foreground="#4CAF50")
             else:
                 slot['translate_btn'].config(text="翻译", state=tk.NORMAL)
-                self.status_label.config(text="翻译失败，请检查 API 设置或网络连接", fg="#f44336")
-        except Exception:
-            pass
+                self.status_label.config(text="翻译失败，请检查 API 设置或网络连接", foreground="#f44336")
+        except Exception as e:
+            # 翻译结果处理失败时，恢复按钮状态
+            try:
+                if slot['translate_btn'].winfo_exists():
+                    slot['translate_btn'].config(text="翻译", state=tk.NORMAL)
+                self.status_label.config(text=f"翻译处理失败：{str(e)}", foreground="#f44336")
+            except Exception:
+                pass
+            logger.error(f"_on_translate_result 异常：{e}")
 
     def _apply_translation(self, slot, original, translated, work_id=""):
-        slot['original_title'] = original
-        slot['translated_title'] = translated
-        slot['show_translated'] = True
-        slot['title_label'].config(text=translated)
-        slot['translate_btn'].pack_forget()
-        slot['toggle_btn'].config(
-            text="原",
-            command=lambda s=slot: self._toggle_title(s)
-        )
-        slot['toggle_btn'].pack(anchor=tk.E, pady=(1, 0))
-        slot['edit_btn'].config(
-            command=lambda s=slot, wid=work_id: self._edit_translation(s, wid)
-        )
-        slot['edit_btn'].pack(anchor=tk.E, pady=(1, 0))
-        if work_id:
-            self.db.save_translated_title(work_id, translated)
+        try:
+            slot['original_title'] = original
+            slot['translated_title'] = translated
+            slot['show_translated'] = True
+            slot['title_label'].config(text=translated)
+            slot['translate_btn'].pack_forget()
+            slot['toggle_btn'].config(
+                text="原",
+                command=lambda s=slot: self._toggle_title(s)
+            )
+            slot['toggle_btn'].pack(anchor=tk.E, pady=(1, 0))
+            slot['edit_btn'].config(
+                command=lambda s=slot, wid=work_id: self._edit_translation(s, wid)
+            )
+            slot['edit_btn'].pack(anchor=tk.E, pady=(1, 0))
+            if work_id:
+                self.db.save_translated_title(work_id, translated)
+        except Exception as e:
+            # 应用翻译失败时，恢复按钮状态
+            try:
+                if slot['translate_btn'].winfo_exists():
+                    slot['translate_btn'].config(text="翻译", state=tk.NORMAL)
+                self.status_label.config(text=f"应用翻译失败：{str(e)}", foreground="#f44336")
+            except Exception:
+                pass
+            logger.error(f"_apply_translation 异常：{e}")
 
     def _toggle_title(self, slot):
         if slot['show_translated']:
@@ -360,7 +468,8 @@ class ListCardMixin:
                     slot['title_label'].config(text=new_translated)
                 if work_id:
                     self.db.save_translated_title(work_id, new_translated)
-                self.status_label.config(text="✓ 翻译已更新", fg="#4CAF50")
+                get_translator().invalidate(original_title)
+                self.status_label.config(text="✓ 翻译已更新", foreground="#4CAF50")
             edit_win.destroy()
 
         def delete_translation():
@@ -372,7 +481,8 @@ class ListCardMixin:
             slot['translate_btn'].pack(side=tk.LEFT, padx=(3, 0))
             if work_id:
                 self.db.delete_translated_title(work_id)
-            self.status_label.config(text="✓ 翻译已删除", fg="#FF9800")
+            get_translator().invalidate(original_title)
+            self.status_label.config(text="✓ 翻译已删除", foreground="#FF9800")
             edit_win.destroy()
 
         tk.Button(btn_frame, text="保存", font=("Microsoft YaHei UI", 10),
@@ -384,3 +494,22 @@ class ListCardMixin:
 
         edit_win.bind("<Return>", lambda e: save_edit())
         edit_win.bind("<Escape>", lambda e: edit_win.destroy())
+
+    def _refresh_card_download_status(self):
+        if not hasattr(self, '_card_slots'):
+            return
+        for slot in self._card_slots:
+            work = slot.get('current_work')
+            if not work:
+                continue
+            source_id = work.get('source_id', '')
+            normalized_id = self._normalize_rj_id(source_id)
+            is_downloaded = normalized_id in self.downloaded_ids_cache
+            try:
+                if slot['downloaded_label'].winfo_exists():
+                    if is_downloaded:
+                        slot['downloaded_label'].pack(anchor=tk.E, pady=(0, 1))
+                    else:
+                        slot['downloaded_label'].pack_forget()
+            except Exception:
+                pass

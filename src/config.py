@@ -31,6 +31,9 @@ _DEFAULT_CONFIG = {
     "slow_speed_threshold": 1,
     "slow_speed_duration": 10,
     "max_slow_restarts": 3,
+    "subtitle_convert_enabled": True,
+    "auto_flatten_enabled": True,
+    "traditional_to_simplified_enabled": True,
 }
 
 
@@ -41,10 +44,16 @@ def _get_app_root():
     return os.path.dirname(current_dir)
 
 _APP_ROOT = _get_app_root()
+_USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else _APP_ROOT
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.33.0"
+VERSION = "v1.50.0"
+
+# show_downloaded 模式常量
+SHOW_ALL = 1          # 显示全部作品
+HIDE_DOWNLOADED = 2   # 隐藏已下载作品
+DOWNLOADED_TAB = 3    # 已下载作品 Tab
 
 _cfg = {}
 try:
@@ -92,3 +101,24 @@ FILENAME_FILTER_CHARS = _cfg.get("filename_filter_chars", "")
 SLOW_SPEED_THRESHOLD = _cfg.get("slow_speed_threshold", 1)
 SLOW_SPEED_DURATION = _cfg.get("slow_speed_duration", 10)
 MAX_SLOW_RESTARTS = _cfg.get("max_slow_restarts", 3)
+SUBTITLE_CONVERT_ENABLED = _cfg.get("subtitle_convert_enabled", True)
+AUTO_FLATTEN_ENABLED = _cfg.get("auto_flatten_enabled", True)
+TRADITIONAL_TO_SIMPLIFIED_ENABLED = _cfg.get("traditional_to_simplified_enabled", True)
+
+
+def _friendly_error(msg: str) -> str:
+    """将技术错误信息转换为用户友好的提示"""
+    msg_lower = msg.lower()
+    if "timeout" in msg_lower or "timed out" in msg_lower:
+        return "网络连接超时，请检查网络设置"
+    if "connection" in msg_lower and "refused" in msg_lower:
+        return "网络连接失败，请检查网络设置"
+    if "429" in msg:
+        return "请求过于频繁，请稍后再试"
+    if "404" in msg:
+        return "请求的资源不存在"
+    if "500" in msg or "502" in msg or "503" in msg:
+        return "服务器暂时不可用，请稍后再试"
+    if "dns" in msg_lower or "name resolution" in msg_lower:
+        return "网络连接失败，请检查网络设置"
+    return msg

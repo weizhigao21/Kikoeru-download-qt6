@@ -3,10 +3,13 @@ from tkinter import ttk, messagebox, filedialog
 import os
 import json
 import shutil
+import logging
 
 from .. import config as _config
-from ..config import _APP_ROOT, CACHE_DIR
+from ..config import _USER_ROOT, CACHE_DIR
 from ..services.translator import get_translator
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsWindow:
@@ -15,9 +18,12 @@ class SettingsWindow:
         self.window.title("设置")
         self.image_cache = image_cache
 
-        config_path = os.path.join(_APP_ROOT, "settings", "config.json")
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
+        config_path = _config.CONFIG_PATH
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except FileNotFoundError:
+            cfg = {}
 
         self.current_values = {
             "download_dir": cfg.get("download_dir", "downloads"),
@@ -33,6 +39,9 @@ class SettingsWindow:
             "ai_model": cfg.get("ai_model", "gpt-3.5-turbo"),
             "ai_translate_editable": cfg.get("ai_translate_editable", True),
             "filename_filter_chars": cfg.get("filename_filter_chars", ""),
+            "subtitle_convert_enabled": cfg.get("subtitle_convert_enabled", True),
+            "auto_flatten_enabled": cfg.get("auto_flatten_enabled", True),
+            "traditional_to_simplified_enabled": cfg.get("traditional_to_simplified_enabled", True),
         }
 
         win_w = 700
@@ -66,6 +75,7 @@ class SettingsWindow:
             ("download", "📥 下载设置"),
             ("queue", "📋 队列设置"),
             ("storage", "💾 存储管理"),
+            ("subtitle", "📝 字幕管理"),
             ("ai", "🤖 AI 翻译"),
         ]
 
@@ -82,6 +92,7 @@ class SettingsWindow:
         self._create_download_page(right_frame)
         self._create_queue_page(right_frame)
         self._create_storage_page(right_frame)
+        self._create_subtitle_page(right_frame)
         self._create_ai_page(right_frame)
 
         btn_frame = ttk.Frame(right_frame)
@@ -144,6 +155,12 @@ class SettingsWindow:
         ttk.Entry(filter_frame, textvariable=self.filename_filter_var, width=25).pack(side=tk.LEFT)
         ttk.Label(filter_frame, text="(额外过滤的字符，如 【】「」《》…)", font=("Microsoft YaHei UI", 9), foreground="gray").pack(side=tk.LEFT, padx=(8, 0))
 
+        self.auto_flatten_var = tk.BooleanVar(value=self.current_values["auto_flatten_enabled"])
+        ttk.Checkbutton(form_frame, text="默认启用自动整理文件夹（下载完成后扁平化嵌套目录）", variable=self.auto_flatten_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=10)
+
+        self.traditional_to_simplified_var = tk.BooleanVar(value=self.current_values["traditional_to_simplified_enabled"])
+        ttk.Checkbutton(form_frame, text="启用繁简转换（下载完成后自动将繁体字幕和文件名转为简体）", variable=self.traditional_to_simplified_var).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=10)
+
     def _create_queue_page(self, parent):
         page = ttk.Frame(parent)
         self.pages["queue"] = page
@@ -202,6 +219,27 @@ class SettingsWindow:
         ttk.Label(page, text="清除缓存将删除所有已下载的图片，程序会重新从网络加载。",
                  font=("Microsoft YaHei UI", 9), foreground="gray").pack(anchor=tk.W, pady=(10, 0))
 
+    def _create_subtitle_page(self, parent):
+        page = ttk.Frame(parent)
+        self.pages["subtitle"] = page
+
+        ttk.Label(page, text="字幕管理", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+
+        desc = ttk.Label(page, text="启用字幕转换后，下载的 VTT 字幕文件将自动转换为 LRC 格式。\n转换后的字幕文件名会移除音频格式后缀（如 .mp3.vtt → .lrc）。",
+                        font=("Microsoft YaHei UI", 9), foreground="gray", wraplength=400)
+        desc.pack(anchor=tk.W, pady=(0, 20))
+
+        form_frame = ttk.Frame(page)
+        form_frame.pack(fill=tk.X)
+        form_frame.columnconfigure(1, weight=1)
+
+        self.subtitle_convert_var = tk.BooleanVar(value=self.current_values["subtitle_convert_enabled"])
+        ttk.Checkbutton(form_frame, text="启用 VTT 字幕自动转换为 LRC", variable=self.subtitle_convert_var).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=10)
+
+        ttk.Label(form_frame, text="转换说明:", font=("Microsoft YaHei UI", 10, "bold")).grid(row=1, column=0, sticky=tk.W, pady=(20, 5))
+        info_text = "• VTT (Web Video Text Tracks) 是一种网页字幕格式\n• LRC (Lyric) 是一种歌词文件格式，支持时间戳\n• 转换后字幕文件名会简化，便于管理\n• 原始 VTT 文件会在转换后自动删除"
+        ttk.Label(form_frame, text=info_text, font=("Microsoft YaHei UI", 9), foreground="gray", justify=tk.LEFT).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
+
     def _create_ai_page(self, parent):
         page = ttk.Frame(parent)
         self.pages["ai"] = page
@@ -243,7 +281,7 @@ class SettingsWindow:
     def browse_dir(self):
         initial_dir = self.download_dir_var.get().strip()
         if not os.path.isabs(initial_dir):
-            initial_dir = os.path.join(_APP_ROOT, initial_dir)
+            initial_dir = os.path.join(_USER_ROOT, initial_dir)
         if not os.path.isdir(initial_dir):
             initial_dir = os.path.dirname(initial_dir)
             if not os.path.isdir(initial_dir):
@@ -281,14 +319,19 @@ class SettingsWindow:
         new_ai_model = self.ai_model_var.get().strip()
         new_ai_editable = self.ai_editable_var.get()
         new_filename_filter = self.filename_filter_var.get().strip()
+        new_subtitle_convert = self.subtitle_convert_var.get()
+        new_auto_flatten = self.auto_flatten_var.get()
+        new_traditional_to_simplified = self.traditional_to_simplified_var.get()
 
         if not new_download_dir:
             messagebox.showerror("错误", "下载目录不能为空", parent=self.window)
             return
 
-        config_path = os.path.join(_APP_ROOT, "settings", "config.json")
+        config_path = _config.CONFIG_PATH
+        settings_dir = os.path.dirname(config_path)
 
         try:
+            os.makedirs(settings_dir, exist_ok=True)
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
 
@@ -307,14 +350,14 @@ class SettingsWindow:
             cfg["ai_model"] = new_ai_model
             cfg["ai_translate_editable"] = new_ai_editable
             cfg["filename_filter_chars"] = new_filename_filter
+            cfg["subtitle_convert_enabled"] = new_subtitle_convert
+            cfg["auto_flatten_enabled"] = new_auto_flatten
+            cfg["traditional_to_simplified_enabled"] = new_traditional_to_simplified
 
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
-        except FileNotFoundError:
-            messagebox.showerror("错误", f"配置文件不存在: {config_path}", parent=self.window)
-            return
         except PermissionError:
             messagebox.showerror("错误", "没有权限写入配置文件", parent=self.window)
             return
@@ -323,7 +366,7 @@ class SettingsWindow:
             return
 
         _config.ARIA2_RPC_URL = new_rpc_url
-        _config.DOWNLOAD_DIR = new_download_dir if os.path.isabs(new_download_dir) else os.path.join(_APP_ROOT, new_download_dir)
+        _config.DOWNLOAD_DIR = new_download_dir if os.path.isabs(new_download_dir) else os.path.join(_USER_ROOT, new_download_dir)
         _config.DOWNLOAD_METHOD = new_download_method
         _config.DIRECT_DOWNLOAD_THREADS = new_direct_threads
         _config.QUEUE_MODE = new_queue_mode
@@ -334,6 +377,9 @@ class SettingsWindow:
         _config.AI_MODEL = new_ai_model
         _config.AI_TRANSLATE_EDITABLE = new_ai_editable
         _config.FILENAME_FILTER_CHARS = new_filename_filter
+        _config.SUBTITLE_CONVERT_ENABLED = new_subtitle_convert
+        _config.AUTO_FLATTEN_ENABLED = new_auto_flatten
+        _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED = new_traditional_to_simplified
 
         from ..download.manager import DownloadManager
         manager = DownloadManager()
@@ -344,8 +390,8 @@ class SettingsWindow:
             translator.update_config(new_ai_key, new_ai_base, new_ai_model)
 
         if new_db_dir != old_db_dir:
-            resolved_new = new_db_dir if os.path.isabs(new_db_dir) else os.path.join(_APP_ROOT, new_db_dir) if new_db_dir else os.path.join(_APP_ROOT, "settings")
-            resolved_old = old_db_dir if os.path.isabs(old_db_dir) else os.path.join(_APP_ROOT, old_db_dir) if old_db_dir else os.path.join(_APP_ROOT, "settings")
+            resolved_new = new_db_dir if os.path.isabs(new_db_dir) else os.path.join(_USER_ROOT, new_db_dir) if new_db_dir else os.path.join(_USER_ROOT, "settings")
+            resolved_old = old_db_dir if os.path.isabs(old_db_dir) else os.path.join(_USER_ROOT, old_db_dir) if old_db_dir else os.path.join(_USER_ROOT, "settings")
 
             if os.path.normpath(resolved_new) != os.path.normpath(resolved_old):
                 os.makedirs(resolved_new, exist_ok=True)
@@ -356,9 +402,9 @@ class SettingsWindow:
                         try:
                             shutil.copy2(src, dst)
                         except Exception as e:
-                            print(f"复制 {db_name} 失败: {e}")
+                            logger.exception("复制 %s 失败: %s", db_name, e)
 
-        _config.DB_DIR = new_db_dir if os.path.isabs(new_db_dir) and new_db_dir else os.path.join(_APP_ROOT, new_db_dir) if new_db_dir else os.path.join(_APP_ROOT, "settings")
+        _config.DB_DIR = new_db_dir if os.path.isabs(new_db_dir) and new_db_dir else os.path.join(_USER_ROOT, new_db_dir) if new_db_dir else os.path.join(_USER_ROOT, "settings")
         _config.DB_PATH = os.path.join(_config.DB_DIR, "works.db")
         _config.DOWNLOAD_HISTORY_DB_PATH = os.path.join(_config.DB_DIR, "download_history.db")
 

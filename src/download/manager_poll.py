@@ -1,20 +1,27 @@
+import os
 import threading
 import time
+import logging
 
 from .models import TaskStatus
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadPollMixin:
     def _poll_loop(self):
+        self._poll_wake_event = threading.Event()
+        idle_cycles = 0
         while self._polling_active:
             with self._tasks_lock:
                 snapshot = list(self.tasks.values())
 
-            changed = False
+            has_downloading = False
             for task in snapshot:
                 if task.status != TaskStatus.DOWNLOADING:
                     continue
 
+                has_downloading = True
                 if task.download_method == "direct":
                     if not task.direct_task_ids:
                         continue
@@ -24,10 +31,7 @@ class DownloadPollMixin:
                         continue
                     self._poll_aria2_task(task)
 
-                changed = True
-
-            if changed:
-                self._notify_observers()
+            self._notify_observers()
 
             self._cleanup_counter += 1
             if self._cleanup_counter >= 10 or (time.time() - self._last_cleanup_time > 300):
@@ -37,15 +41,152 @@ class DownloadPollMixin:
 
             with self._tasks_lock:
                 any_active = any(
-                    t.status in (TaskStatus.DOWNLOADING, TaskStatus.SUBMITTING)
+                    t.status in (TaskStatus.DOWNLOADING, TaskStatus.SUBMITTING, TaskStatus.CONVERTING)
                     for t in self.tasks.values()
                 )
 
             if not any_active:
-                self._polling_active = False
-                break
+                # 检查是否还有下载线程在运行
+                threads_alive = any(
+                    hasattr(t, 'download_threads') and any(th.is_alive() for th in t.download_threads)
+                    for t in snapshot
+                    if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+                )
+                if not threads_alive:
+                    self._do_pending_flatten()
+                    self._polling_active = False
+                    break
 
-            time.sleep(1)
+            if has_downloading:
+                idle_cycles = 0
+                sleep_time = 1
+            else:
+                idle_cycles += 1
+                sleep_time = min(1 + idle_cycles * 0.5, 5)
+
+            self._poll_wake_event.wait(timeout=sleep_time)
+            self._poll_wake_event.clear()
+
+    def _do_pending_flatten(self):
+        """所有下载任务完成后，批量执行文件夹整理"""
+        dirs = list(self._pending_flatten)
+        self._pending_flatten.clear()
+        for save_dir in dirs:
+            try:
+                self._flatten_folders(save_dir)
+            except Exception as e:
+                logger.exception("[整理] 批量整理失败: %s: %s", save_dir, e)
+
+    def _on_task_completed(self, task):
+        """任务完成时的处理（不立即整理文件夹）"""
+        if hasattr(task, 'save_dir') and task.save_dir:
+            from .. import config as _config
+            if _config.AUTO_FLATTEN_ENABLED:
+                self._pending_flatten.append(task.save_dir)
+            try:
+                if _config.SUBTITLE_CONVERT_ENABLED:
+                    with self._tasks_lock:
+                        task.status = TaskStatus.CONVERTING
+                    self._notify_observers()
+                    threading.Thread(
+                        target=self._convert_subtitles_and_complete,
+                        args=(task,),
+                        daemon=True
+                    ).start()
+                    return
+            except Exception as e:
+                logger.exception("[字幕] 处理失败: %s", e)
+        with self._tasks_lock:
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = time.time()
+        self._sync_task_status(task)
+        self._remove_persisted(task.work_id)
+        if self.download_history is not None and task.work:
+            threading.Thread(target=self._housekeeping, args=(task.work,), daemon=True).start()
+        self._notify_observers()
+
+    def _flatten_folders(self, save_dir):
+        """将多层嵌套文件夹扁平化，只保留最后一层"""
+        if not os.path.isdir(save_dir):
+            return
+        moved = 0
+        failed = []
+        for root, dirs, files in os.walk(save_dir):
+            if root == save_dir:
+                continue
+            rel = os.path.relpath(root, save_dir)
+            parts = rel.split(os.sep)
+            if len(parts) <= 1:
+                continue
+            for filename in files:
+                src = os.path.join(root, filename)
+                dest_folder = os.path.join(save_dir, parts[-1])
+                os.makedirs(dest_folder, exist_ok=True)
+                dest = os.path.join(dest_folder, filename)
+                if src == dest:
+                    continue
+                try:
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    os.replace(src, dest)
+                    moved += 1
+                except Exception:
+                    failed.append((src, dest))
+
+        for src, dest in failed:
+            for attempt in range(3):
+                time.sleep(2)
+                try:
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    os.replace(src, dest)
+                    moved += 1
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        logger.error("[整理] 移动失败(已重试3次): %s -> %s: %s", src, dest, e)
+
+        if moved > 0:
+            logger.info("[整理] 已整理 %d 个文件到根目录", moved)
+            for root, dirs, files in os.walk(save_dir, topdown=False):
+                if root == save_dir:
+                    continue
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except Exception:
+                    pass
+
+    def _convert_subtitles_and_complete(self, task):
+        """转换字幕并标记任务完成"""
+        try:
+            from ..services.subtitle_converter import process_subtitle_in_directory
+            converted = process_subtitle_in_directory(task.save_dir)
+            if converted:
+                logger.info("[字幕] 转换完成: %d 个文件", len(converted))
+        except Exception as e:
+            logger.exception("[字幕] 转换失败: %s", e)
+
+        # 繁简转换
+        try:
+            from .. import config as _config
+            if _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
+                from ..services.text_converter import process_directory
+                result = process_directory(task.save_dir)
+                if result['content_converted'] or result['filename_converted']:
+                    logger.info("[繁简] 转换完成: 内容 %d 个, 文件名 %d 个",
+                               len(result['content_converted']), len(result['filename_converted']))
+        except Exception as e:
+            logger.exception("[繁简] 转换失败: %s", e)
+
+        with self._tasks_lock:
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = time.time()
+        self._sync_task_status(task)
+        self._remove_persisted(task.work_id)
+        if self.download_history is not None and task.work:
+            threading.Thread(target=self._housekeeping, args=(task.work,), daemon=True).start()
+        self._notify_observers()
 
     def _poll_direct_task(self, task):
         from .downloader_direct import poll_direct_progress
@@ -53,25 +194,54 @@ class DownloadPollMixin:
         if not task.direct_task_ids:
             return
 
-        total, completed, speed, has_error = poll_direct_progress(task.direct_task_ids)
+        total, completed, speed, has_error, error_count, all_resolved = poll_direct_progress(task.direct_task_ids)
 
         with self._tasks_lock:
-            task.total_bytes = total
+            # 防止进度条跳动：total 只包含已注册的 task_id，
+            # 当一个文件完成、下一个文件还没注册时，total 会变小导致进度回退。
+            # 用历史最大值防止 total 下降。
+            if not hasattr(task, '_peak_total_bytes'):
+                task._peak_total_bytes = 0
+            task._peak_total_bytes = max(task._peak_total_bytes, total)
+            task.total_bytes = task._peak_total_bytes
             task.completed_bytes = completed
             task.speed = speed
 
-            all_done = len(task.direct_task_ids) == 0
-            progress_complete = total > 0 and completed >= total
+            # 未全部完成时，进度不超过 99.9%
+            if not all_resolved and task.total_bytes > 0 and task.completed_bytes >= task.total_bytes:
+                task.completed_bytes = task.total_bytes - 1
 
-            if all_done or progress_complete:
-                if has_error and completed == 0:
+            if all_resolved:
+                # 检查下载线程是否都已结束
+                threads = getattr(task, 'download_threads', [])
+                if threads and any(th.is_alive() for th in threads):
+                    # 线程还在运行，等待下一次轮询
+                    pass
+                elif has_error and completed == 0:
                     task.status = TaskStatus.FAILED
+                elif has_error and error_count > 0:
+                    if not hasattr(task, '_retry_count'):
+                        task._retry_count = 0
+                    task._retry_count += 1
+                    if task._retry_count <= 3:
+                        logger.info("[重试] %s 有 %s 个文件失败，自动重试 (第%d次)", task.work_id, error_count, task._retry_count)
+                        threading.Thread(
+                            target=self._retry_task,
+                            args=(task,),
+                            daemon=True
+                        ).start()
+                        return
+                    else:
+                        logger.warning("[下载] %s 达到最大重试次数，标记为失败", task.work_id)
+                        task.status = TaskStatus.FAILED
                 else:
                     task.status = TaskStatus.COMPLETED
                     task.completed_at = time.time()
         if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             self._sync_task_status(task)
             self._slow_speed_tracker.pop(task.work_id, None)
+            if task.status == TaskStatus.COMPLETED:
+                self._on_task_completed(task)
 
         if task.status == TaskStatus.DOWNLOADING:
             self._check_slow_speed(task)
@@ -87,29 +257,19 @@ class DownloadPollMixin:
             task.speed = speed
 
             if new_gids_count == 0:
-                if has_error and total == 0 and completed == 0:
+                if has_error and old_gids_count > 0:
                     if not hasattr(task, '_retry_count'):
                         task._retry_count = 0
                     task._retry_count += 1
                     if task._retry_count <= 3:
+                        logger.info("[重试] %s 有文件下载失败，自动重试 (第%d次)", task.work_id, task._retry_count)
                         threading.Thread(
                             target=self._retry_task,
                             args=(task,),
                             daemon=True
                         ).start()
                     else:
-                        task.status = TaskStatus.FAILED
-                elif has_error and completed < total:
-                    if not hasattr(task, '_retry_count'):
-                        task._retry_count = 0
-                    task._retry_count += 1
-                    if task._retry_count <= 3:
-                        threading.Thread(
-                            target=self._retry_task,
-                            args=(task,),
-                            daemon=True
-                        ).start()
-                    else:
+                        logger.warning("[下载] %s 达到最大重试次数，标记为失败", task.work_id)
                         task.status = TaskStatus.FAILED
                 elif not has_error and old_gids_count > 0:
                     task.status = TaskStatus.COMPLETED
@@ -164,13 +324,21 @@ class DownloadPollMixin:
             self._check_slow_speed(task)
         elif task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             self._slow_speed_tracker.pop(task.work_id, None)
+            if task.status == TaskStatus.COMPLETED:
+                self._on_task_completed(task)
 
     def _retry_task(self, task):
         import random
 
         wait_time = 5 + random.randint(0, 10)
-        print(f"[重试] {task.work_id} 等待 {wait_time} 秒后重试 (第 {task._retry_count} 次)")
+        logger.info("[重试] %s 等待 %d 秒后重试 (第 %d 次)", task.work_id, wait_time, task._retry_count)
         time.sleep(wait_time)
+
+        # 等待旧下载线程结束，防止重复下载
+        old_threads = getattr(task, 'download_threads', [])
+        if old_threads:
+            for t in old_threads:
+                t.join(timeout=30)
 
         if task.download_method == "aria2":
             from .downloader import remove_aria2_downloads, purge_aria2_downloads
@@ -183,6 +351,8 @@ class DownloadPollMixin:
             task.total_bytes = 0
             task.completed_bytes = 0
             task.speed = 0
+            task.download_threads = []
+            task._peak_total_bytes = 0
 
         self._submit_task(task.work, task.files, task)
 
@@ -207,10 +377,11 @@ class DownloadPollMixin:
             return
         restart_count = self._slow_restart_count.get(wid, 0)
         if restart_count >= self._MAX_SLOW_RESTARTS:
-            print(f"[低速重启] {wid} 已达最大重启次数 ({self._MAX_SLOW_RESTARTS})，不再自动重启")
+            logger.warning("[低速重启] %s 已达最大重启次数 (%d)，不再自动重启", wid, self._MAX_SLOW_RESTARTS)
             self._slow_speed_tracker.pop(wid, None)
             return
-        print(f"[低速重启] {wid} 低速持续 {slow_duration:.0f}s (速度: {task.speed / 1024:.0f} KB/s)，自动重启 (第{restart_count + 1}次)")
+        logger.info("[低速重启] %s 低速持续 %.0fs (速度: %.0f KB/s)，自动重启 (第%d次)",
+                    wid, slow_duration, task.speed / 1024, restart_count + 1)
         self._slow_speed_tracker.pop(wid, None)
         self._slow_restart_count[wid] = restart_count + 1
         threading.Thread(target=self._auto_restart_slow_task, args=(task,), daemon=True).start()
