@@ -1,3 +1,11 @@
+## v1.51.0
+
+- **新增**：VTT→LRC 字幕转换实现 — `subtitle_converter.py` 桩代码替换为完整实现：解析 VTT 时间戳（HH:MM:SS.mmm → [mm:ss.xx]）、跳过 WEBVTT 头部/NOTE/STYLE 块、移除 HTML 标签（`<c>` `<i>` `<b>` 等）、支持 UTF-8（含 BOM）和 Shift-JIS 编码、转换后自动删除原 `.vtt` 文件
+- **修复**：字幕转换文件名后缀残留 — 转换后 `.mp3.vtt` → `.mp3.lrc` 问题修复，新增 `_strip_audio_suffix_and_vtt` 函数自动识别并去除 10 种常见音频后缀（.mp3/.wav/.flac/.m4a/.ogg/.wma/.aac/.opus/.ape/.wv），`track01.mp3.vtt` 正确转为 `track01.lrc`
+- **修复**：自动整理文件夹与字幕转换间歇性失效 — `_poll_loop` 退出时与 `_ensure_polling` 存在竞态条件：轮询循环准备退出时新任务提交被忽略，导致后续任务无人监控、整理和转换永不执行。轮询循环改为永不退出，空闲时 30 秒深度睡眠，新任务通过 `_poll_wake_event` 唤醒；`_ensure_polling` 不再简单地返回，而是主动唤醒已有轮询线程
+- **修复**：字幕转换完成后自动整理延迟过长 — `_convert_subtitles_and_complete` 和 `_on_task_completed` 现在主动 `set()` 唤醒事件，轮询循环立即检测到任务完毕并执行自动整理，无需等待下次轮询周期
+- **修复**：`_do_pending_flatten` 中途失败丢失后续目录 — 从一次性 `clear()` 全部列表改为 `pop(0)` 逐个处理，失败只影响当前目录
+
 ## v1.50.0
 
 - **新增**：繁简转换功能 — 下载完成后自动将繁体字幕内容和文件名转换为简体中文，使用 `zhconv` 库实现；设置 → 下载设置中新增"启用繁简转换"开关，位于"自动整理文件夹"下方

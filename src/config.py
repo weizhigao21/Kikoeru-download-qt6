@@ -31,7 +31,7 @@ _DEFAULT_CONFIG = {
     "slow_speed_threshold": 1,
     "slow_speed_duration": 10,
     "max_slow_restarts": 3,
-    "subtitle_convert_enabled": True,
+    "subtitle_convert_enabled": False,
     "auto_flatten_enabled": True,
     "traditional_to_simplified_enabled": True,
 }
@@ -48,7 +48,7 @@ _USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) el
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.50.0"
+VERSION = "v1.51.0"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品

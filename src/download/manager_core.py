@@ -119,11 +119,7 @@ class DownloadCoreMixin:
                 task.total_bytes = 0
                 task.completed_bytes = 0
             self._sync_task_status(task)
-
-        if task.status == TaskStatus.DOWNLOADING:
-            self._check_slow_speed(task)
-        elif task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-            self._slow_speed_tracker.pop(task.work_id, None)
+            self._on_task_completed(task)
             self._notify_observers()
             return
 
@@ -201,6 +197,7 @@ class DownloadCoreMixin:
                 task.total_bytes = 0
                 task.completed_bytes = 0
             self._sync_task_status(task)
+            self._on_task_completed(task)
             self._notify_observers()
             return
 
@@ -236,6 +233,7 @@ class DownloadCoreMixin:
         with self._tasks_lock:
             task.direct_task_ids = task_ids
             task.gids = set()
+            task.download_threads = threads
             task.status = TaskStatus.DOWNLOADING
         self._notify_observers()
 
@@ -258,6 +256,7 @@ class DownloadCoreMixin:
 
     def _ensure_polling(self):
         if self._polling_active:
+            self._poll_wake_event.set()
             return
         self._polling_active = True
         self._polling_thread = threading.Thread(target=self._poll_loop, daemon=True)

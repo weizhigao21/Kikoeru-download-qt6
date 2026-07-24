@@ -234,6 +234,8 @@ def poll_direct_progress(task_ids):
     completed = 0
     speed = 0
     has_error = False
+    error_count = 0
+    unresolved = 0
 
     with _progress_lock:
         for task_id in list(task_ids):
@@ -247,10 +249,15 @@ def poll_direct_progress(task_ids):
                 completed += task_completed if task_completed > 0 else task_total
             elif status in ("error", "cancelled"):
                 has_error = True
+                error_count += 1
                 task_ids.discard(task_id)
             elif status == "downloading":
+                unresolved += 1
                 total += progress.get("total", 0)
                 completed += progress.get("completed", 0)
                 speed += progress.get("speed", 0)
+            else:
+                unresolved += 1
 
-    return total, completed, speed, has_error
+    all_resolved = (unresolved == 0)
+    return total, completed, speed, has_error, error_count, all_resolved

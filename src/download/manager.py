@@ -48,6 +48,8 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         self._MAX_TOTAL_TASKS = 200
         self._cleanup_counter = 0
         self._last_cleanup_time = time.time()
+        self._pending_flatten: list[str] = []
+        self._poll_wake_event = threading.Event()
 
     def set_download_history(self, dh):
         self.download_history = dh

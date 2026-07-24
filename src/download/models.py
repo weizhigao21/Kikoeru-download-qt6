@@ -6,6 +6,7 @@ from typing import Optional
 class TaskStatus(Enum):
     SUBMITTING = "submitting"
     DOWNLOADING = "downloading"
+    CONVERTING = "converting"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -29,3 +30,12 @@ class DownloadTask:
     work: dict = field(default_factory=dict)
     files: list = field(default_factory=list)
     download_method: str = "aria2"
+    # 重试相关属性
+    retry_count: int = 0
+    consecutive_errors: int = 0
+    # 进度跟踪属性
+    peak_total_bytes: int = 0
+    last_progress_time: float = 0.0
+    last_completed: int = 0
+    # 下载线程管理
+    download_threads: list = field(default_factory=list)

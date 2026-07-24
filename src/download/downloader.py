@@ -104,31 +104,38 @@ class WorkDownloader:
         return save_dir, gid
 
     def save_cover_image(self, save_dir: str):
-        main_cover_url = self.work.get("mainCoverUrl", "")
-        if not main_cover_url:
-            source_id = self.work.get("source_id", "")
-            numeric_id = source_id.replace("RJ", "").replace("rg", "").replace("RG", "").lstrip("0")
-            if numeric_id:
-                main_cover_url = f"https://api.asmr-200.com/api/cover/{numeric_id}.jpg?type=main"
-                print(f"[DEBUG] 使用构建的封面URL: {main_cover_url}")
-            else:
-                print(f"[DEBUG] 封面URL为空，跳过保存封面")
-                return False
+        source_id = self.work.get("source_id", "")
+        numeric_id = source_id.replace("RJ", "").replace("rg", "").replace("RG", "").lstrip("0")
 
-        try:
-            session = get_http_session()
-            response = session.get(main_cover_url, timeout=30)
-            print(f"[DEBUG] 封面请求状态码: {response.status_code}")
-            if response.status_code == 200:
-                cover_path = os.path.join(save_dir, "封面.jpg")
-                with open(cover_path, 'wb') as f:
-                    f.write(response.content)
-                print(f"[DEBUG] 封面已保存到: {cover_path}")
-                return True
-            else:
-                print(f"[DEBUG] 封面下载失败，状态码: {response.status_code}")
-        except Exception as e:
-            print(f"下载封面失败: {e}")
+        urls_to_try = []
+        if numeric_id:
+            urls_to_try.append(
+                f"https://api.asmr-200.com/api/cover/{numeric_id}.jpg?type=main"
+            )
+        main_cover_url = self.work.get("mainCoverUrl", "")
+        if main_cover_url:
+            urls_to_try.append(main_cover_url)
+
+        if not urls_to_try:
+            print(f"[DEBUG] 封面URL为空，跳过保存封面")
+            return False
+
+        for url in urls_to_try:
+            try:
+                session = get_http_session()
+                response = session.get(url, timeout=30)
+                if response.status_code == 200 and len(response.content) > 1024:
+                    cover_path = os.path.join(save_dir, "封面.jpg")
+                    with open(cover_path, 'wb') as f:
+                        f.write(response.content)
+                    print(f"[DEBUG] 封面已保存到: {cover_path} ({len(response.content)} 字节)")
+                    return True
+                else:
+                    print(f"[DEBUG] 封面 {url[:60]}... 无效 (状态={response.status_code}, 大小={len(response.content)})")
+            except Exception as e:
+                print(f"[DEBUG] 封面请求失败: {url[:60]}... -> {e}")
+
+        print(f"[DEBUG] 所有封面URL均失败")
         return False
 
     def save_tags(self, save_dir: str):

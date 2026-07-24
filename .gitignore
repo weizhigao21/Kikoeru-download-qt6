@@ -33,9 +33,14 @@ logs/
 # IDE
 .vscode/
 .idea/
+.codegraph/
 *.swp
 *.swo
 *~
+*.orig
+
+# 临时文件
+tmp_all.md
 
 # 操作系统
 .DS_Store
