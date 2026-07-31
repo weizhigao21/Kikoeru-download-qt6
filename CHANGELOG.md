@@ -1,3 +1,7 @@
+## v1.53.0
+
+- **修复**：下载完成主界面底部进度框空边框残留 — `_refresh_task_display` 中无活跃任务时未隐藏 `dl_task_frame` 容器（带 `relief=tk.SOLID, bd=1` 边框），所有下载完成后留一个空白的边框框框。修复后在 `_refresh_task_display` 末尾根据是否有活跃任务 `grid()` / `grid_remove()` 整个容器
+
 ## v1.52.0
 
 - **新增**：AI 翻译思考模式（DeepSeek） — 设置 → AI 翻译新增"启用思考模式"开关（默认开启）。开启后请求添加 `thinking: {"type": "enabled"}` + `reasoning_effort: "high"` 参数，翻译更准确但响应更慢；思考模式下自动省略不支持的温度参数（`temperature`）并将 `max_tokens` 提升至 1024；翻译请求超时自动放宽至 90 秒、UI 超时保护放宽至 100 秒

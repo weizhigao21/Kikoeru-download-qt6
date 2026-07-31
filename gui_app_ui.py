@@ -257,6 +257,12 @@ class UISetupMixin:
                     slot["frame"].grid_remove()
                     slot["_visible"] = False
 
+        # 没有活跃任务时隐藏整个容器，避免空边框显示
+        if active_tasks:
+            self.dl_task_frame.grid()
+        else:
+            self.dl_task_frame.grid_remove()
+
     def open_settings(self):
         from src.ui.gui_settings import SettingsWindow
         self._settings_win = SettingsWindow(self.root, image_cache=self.image_cache)
