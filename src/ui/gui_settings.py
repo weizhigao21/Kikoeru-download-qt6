@@ -37,6 +37,7 @@ class SettingsWindow:
             "ai_key": cfg.get("ai_api_key", ""),
             "ai_base": cfg.get("ai_api_base_url", "https://api.openai.com/v1"),
             "ai_model": cfg.get("ai_model", "gpt-3.5-turbo"),
+            "ai_thinking_enabled": cfg.get("ai_thinking_enabled", True),
             "ai_translate_editable": cfg.get("ai_translate_editable", True),
             "filename_filter_chars": cfg.get("filename_filter_chars", ""),
             "subtitle_convert_enabled": cfg.get("subtitle_convert_enabled", True),
@@ -112,6 +113,18 @@ class SettingsWindow:
 
         if page_key in self.pages:
             self.pages[page_key].pack(fill=tk.BOTH, expand=True)
+
+    def _bind_mousewheel(self, widget):
+        """递归绑定滚轮事件，使可滚动区域内的所有子控件都能响应"""
+        widget.bind("<MouseWheel>", self._on_ai_scroll)
+        for child in widget.winfo_children():
+            self._bind_mousewheel(child)
+
+    def _on_ai_scroll(self, event):
+        canvas = getattr(self, "_ai_canvas", None)
+        if canvas is not None:
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+        return "break"
 
     def _create_download_page(self, parent):
         page = ttk.Frame(parent)
@@ -241,8 +254,24 @@ class SettingsWindow:
         ttk.Label(form_frame, text=info_text, font=("Microsoft YaHei UI", 9), foreground="gray", justify=tk.LEFT).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
 
     def _create_ai_page(self, parent):
-        page = ttk.Frame(parent)
-        self.pages["ai"] = page
+        # AI 设置内容较多，使用可滚动容器避免超出窗口高度
+        container = ttk.Frame(parent)
+        self.pages["ai"] = container
+
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        page = ttk.Frame(canvas)
+        win_id = canvas.create_window((0, 0), window=page, anchor="nw")
+        page.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win_id, width=e.width))
+
+        self._ai_canvas = canvas
+        self._bind_mousewheel(canvas)
+        self._bind_mousewheel(page)
 
         ttk.Label(page, text="AI 翻译设置", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
 
@@ -273,10 +302,14 @@ class SettingsWindow:
         ttk.Label(model_frame, text="(如 deepseek-chat, gpt-3.5-turbo)", font=("Microsoft YaHei UI", 9),
                  foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
 
-        ttk.Separator(form_frame, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=15)
+        self.ai_thinking_var = tk.BooleanVar(value=self.current_values["ai_thinking_enabled"])
+        ttk.Checkbutton(form_frame, text="启用思考模式（DeepSeek 推理模式，翻译更准确但响应更慢）",
+                        variable=self.ai_thinking_var).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=10)
+
+        ttk.Separator(form_frame, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=15)
 
         self.ai_editable_var = tk.BooleanVar(value=self.current_values.get("ai_translate_editable", True))
-        ttk.Checkbutton(form_frame, text="启用翻译编辑（允许手动修改翻译结果）", variable=self.ai_editable_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=10)
+        ttk.Checkbutton(form_frame, text="启用翻译编辑（允许手动修改翻译结果）", variable=self.ai_editable_var).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=10)
 
     def browse_dir(self):
         initial_dir = self.download_dir_var.get().strip()
@@ -317,6 +350,7 @@ class SettingsWindow:
         new_ai_key = self.ai_key_var.get().strip()
         new_ai_base = self.ai_base_var.get().strip()
         new_ai_model = self.ai_model_var.get().strip()
+        new_ai_thinking = self.ai_thinking_var.get()
         new_ai_editable = self.ai_editable_var.get()
         new_filename_filter = self.filename_filter_var.get().strip()
         new_subtitle_convert = self.subtitle_convert_var.get()
@@ -348,6 +382,7 @@ class SettingsWindow:
             cfg["ai_api_key"] = new_ai_key
             cfg["ai_api_base_url"] = new_ai_base
             cfg["ai_model"] = new_ai_model
+            cfg["ai_thinking_enabled"] = new_ai_thinking
             cfg["ai_translate_editable"] = new_ai_editable
             cfg["filename_filter_chars"] = new_filename_filter
             cfg["subtitle_convert_enabled"] = new_subtitle_convert
@@ -375,6 +410,7 @@ class SettingsWindow:
         _config.AI_API_KEY = new_ai_key
         _config.AI_API_BASE_URL = new_ai_base
         _config.AI_MODEL = new_ai_model
+        _config.AI_THINKING_ENABLED = new_ai_thinking
         _config.AI_TRANSLATE_EDITABLE = new_ai_editable
         _config.FILENAME_FILTER_CHARS = new_filename_filter
         _config.SUBTITLE_CONVERT_ENABLED = new_subtitle_convert
@@ -387,7 +423,7 @@ class SettingsWindow:
 
         translator = get_translator()
         if new_ai_enabled and new_ai_key:
-            translator.update_config(new_ai_key, new_ai_base, new_ai_model)
+            translator.update_config(new_ai_key, new_ai_base, new_ai_model, new_ai_thinking)
 
         if new_db_dir != old_db_dir:
             resolved_new = new_db_dir if os.path.isabs(new_db_dir) else os.path.join(_USER_ROOT, new_db_dir) if new_db_dir else os.path.join(_USER_ROOT, "settings")

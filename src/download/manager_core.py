@@ -201,29 +201,37 @@ class DownloadCoreMixin:
             self._notify_observers()
             return
 
-        task_ids = set()
         max_threads = _config.DIRECT_DOWNLOAD_THREADS
 
-        def download_sequential(file_list, task_id_set):
+        # 预生成所有 task_id，让 _poll_direct_task 从一开始就能看到完整的文件列表，
+        # 防止下载线程在文件间 2 秒间隙中未注册新 task_id 时，poll 误判 all_resolved=True
+        total_to_download = len(files_to_download)
+        task_ids = set()
+        task_id_list = []
+        for idx in range(total_to_download):
+            tid = f"{task.work_id}_{idx}"
+            task_ids.add(tid)
+            task_id_list.append(tid)
+
+        def download_sequential(file_list, start_index):
             for i, file_info in enumerate(file_list):
                 if task.status == TaskStatus.CANCELLED:
                     break
-                task_id = f"{task.work_id}_{len(task_ids)}"
-                task_ids.add(task_id)
-                self._direct_download_file(file_info, save_dir, task_id)
+                tid = task_id_list[start_index + i]
+                self._direct_download_file(file_info, save_dir, tid)
                 if i < len(file_list) - 1:
                     time.sleep(2)
 
-        batch_size = max(1, (len(files_to_download) + max_threads - 1) // max_threads)
+        batch_size = max(1, (total_to_download + max_threads - 1) // max_threads)
         batches = []
-        for i in range(0, len(files_to_download), batch_size):
-            batches.append(files_to_download[i:i + batch_size])
+        for idx in range(0, total_to_download, batch_size):
+            batches.append((idx, files_to_download[idx:idx + batch_size]))
 
         threads = []
-        for batch in batches:
+        for start_idx, batch in batches:
             t = threading.Thread(
                 target=download_sequential,
-                args=(batch, task_ids),
+                args=(batch, start_idx),
                 daemon=True
             )
             t.start()

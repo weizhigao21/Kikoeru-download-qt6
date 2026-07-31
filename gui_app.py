@@ -146,7 +146,8 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
             translator.update_config(
                 _config.AI_API_KEY,
                 _config.AI_API_BASE_URL,
-                _config.AI_MODEL
+                _config.AI_MODEL,
+                _config.AI_THINKING_ENABLED
             )
 
     def _retry_download(self, work_id):

@@ -26,6 +26,7 @@ _DEFAULT_CONFIG = {
     "ai_api_key": "",
     "ai_api_base_url": "https://api.openai.com/v1",
     "ai_model": "gpt-3.5-turbo",
+    "ai_thinking_enabled": True,
     "ai_translate_editable": True,
     "filename_filter_chars": "",
     "slow_speed_threshold": 1,
@@ -48,7 +49,7 @@ _USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) el
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.51.0"
+VERSION = "v1.52.0"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -91,6 +92,7 @@ AI_TRANSLATE_ENABLED = _cfg.get("ai_translate_enabled", False)
 AI_API_KEY = _cfg.get("ai_api_key", "")
 AI_API_BASE_URL = _cfg.get("ai_api_base_url", "https://api.openai.com/v1")
 AI_MODEL = _cfg.get("ai_model", "gpt-3.5-turbo")
+AI_THINKING_ENABLED = _cfg.get("ai_thinking_enabled", True)
 AI_TRANSLATE_EDITABLE = _cfg.get("ai_translate_editable", True)
 
 DOWNLOAD_METHOD = _cfg.get("download_method", "aria2")

@@ -337,7 +337,10 @@ class ListCardMixin:
 
         self.root.after(500, animate_dots)
 
-        # 超时保护：35 秒后如果仍在翻译中，自动恢复按钮状态
+        # 超时保护：思考模式下推理较慢，超时放宽到 100 秒；普通模式 35 秒
+        thinking_enabled = getattr(_config, 'AI_THINKING_ENABLED', True)
+        timeout_ms = 100000 if thinking_enabled else 35000
+
         def on_timeout():
             if not slot.get('_translation_active'):
                 return
@@ -352,7 +355,7 @@ class ListCardMixin:
                 self.status_label.config(text="翻译超时，请检查网络或 API 设置", foreground="#f44336")
                 logger.warning(f"翻译超时: {title[:30]}...")
 
-        timeout_timer = self.root.after(35000, on_timeout)
+        timeout_timer = self.root.after(timeout_ms, on_timeout)
         slot['_translation_timeout_timer'] = timeout_timer
 
         def on_result(translated):

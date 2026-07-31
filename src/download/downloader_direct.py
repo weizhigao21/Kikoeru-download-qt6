@@ -9,6 +9,17 @@ _download_progress = {}
 _progress_lock = threading.Lock()
 
 
+def _set_progress(task_id, **kwargs):
+    """安全设置下载进度字段：如果 task_id 已被清理则静默跳过"""
+    if not task_id:
+        return
+    with _progress_lock:
+        entry = _download_progress.get(task_id)
+        if entry is None:
+            return
+        entry.update(kwargs)
+
+
 def get_remote_file_size(url):
     try:
         session = get_http_session()
@@ -73,9 +84,7 @@ class DirectDownloader:
 
         for attempt in range(max_retries):
             if self._cancelled:
-                if task_id:
-                    with _progress_lock:
-                        _download_progress[task_id]["status"] = "cancelled"
+                _set_progress(task_id, status="cancelled")
                 return False
 
             try:
@@ -94,12 +103,7 @@ class DirectDownloader:
                             print(f"[直接下载] 文件已完整(416)，跳过: {filename}")
                             remote_size = get_remote_file_size(url)
                             final_size = remote_size if remote_size > 0 else local_offset
-                            if task_id:
-                                with _progress_lock:
-                                    _download_progress[task_id]["total"] = final_size
-                                    _download_progress[task_id]["completed"] = final_size
-                                    _download_progress[task_id]["status"] = "complete"
-                                    _download_progress[task_id]["speed"] = 0
+                            _set_progress(task_id, total=final_size, completed=final_size, status="complete", speed=0)
                             return True
 
                         if response.status_code == 206:
@@ -144,9 +148,7 @@ class DirectDownloader:
                 else:
                     total_size = int(response.headers.get('content-length', 0))
 
-                if task_id:
-                    with _progress_lock:
-                        _download_progress[task_id]["total"] = total_size
+                _set_progress(task_id, total=total_size)
 
                 downloaded = local_offset
                 last_time = time.time()
@@ -157,9 +159,7 @@ class DirectDownloader:
                 with open(filepath, file_mode) as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         if self._cancelled:
-                            if task_id:
-                                with _progress_lock:
-                                    _download_progress[task_id]["status"] = "cancelled"
+                            _set_progress(task_id, status="cancelled")
                             return False
 
                         if chunk:
@@ -173,19 +173,10 @@ class DirectDownloader:
                                 last_time = current_time
                                 last_downloaded = downloaded
 
-                                if task_id:
-                                    with _progress_lock:
-                                        _download_progress[task_id]["completed"] = downloaded
-                                        _download_progress[task_id]["speed"] = speed
+                                _set_progress(task_id, completed=downloaded, speed=speed)
 
                 final_total = total_size if total_size > 0 else downloaded
-                if task_id:
-                    with _progress_lock:
-                        _download_progress[task_id]["status"] = "complete"
-                        _download_progress[task_id]["total"] = final_total
-                        _download_progress[task_id]["completed"] = final_total
-                        _download_progress[task_id]["speed"] = 0
-
+                _set_progress(task_id, status="complete", total=final_total, completed=final_total, speed=0)
                 return True
 
             except requests.exceptions.HTTPError as e:
@@ -195,9 +186,7 @@ class DirectDownloader:
                     time.sleep(wait_time)
                     continue
                 print(f"[直接下载] 失败: {filename} - {e}")
-                if task_id:
-                    with _progress_lock:
-                        _download_progress[task_id]["status"] = "error"
+                _set_progress(task_id, status="error")
                 return False
 
             except Exception as e:
@@ -205,14 +194,10 @@ class DirectDownloader:
                 if attempt < max_retries - 1:
                     time.sleep(retry_wait)
                     continue
-                if task_id:
-                    with _progress_lock:
-                        _download_progress[task_id]["status"] = "error"
+                _set_progress(task_id, status="error")
                 return False
 
-        if task_id:
-            with _progress_lock:
-                _download_progress[task_id]["status"] = "error"
+        _set_progress(task_id, status="error")
         return False
 
     def cancel(self):
@@ -238,6 +223,7 @@ def poll_direct_progress(task_ids):
     unresolved = 0
 
     with _progress_lock:
+        # 使用快照迭代，不修改原始 task_ids 集合（防止与 _submit_direct 的线程竞争）
         for task_id in list(task_ids):
             progress = _download_progress.get(task_id, {})
             status = progress.get("status", "")
@@ -250,13 +236,13 @@ def poll_direct_progress(task_ids):
             elif status in ("error", "cancelled"):
                 has_error = True
                 error_count += 1
-                task_ids.discard(task_id)
             elif status == "downloading":
                 unresolved += 1
                 total += progress.get("total", 0)
                 completed += progress.get("completed", 0)
                 speed += progress.get("speed", 0)
             else:
+                # status 为空（未开始下载或 task_id 尚未注册）
                 unresolved += 1
 
     all_resolved = (unresolved == 0)

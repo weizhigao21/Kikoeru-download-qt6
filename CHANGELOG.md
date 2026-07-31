@@ -1,3 +1,14 @@
+## v1.52.0
+
+- **新增**：AI 翻译思考模式（DeepSeek） — 设置 → AI 翻译新增"启用思考模式"开关（默认开启）。开启后请求添加 `thinking: {"type": "enabled"}` + `reasoning_effort: "high"` 参数，翻译更准确但响应更慢；思考模式下自动省略不支持的温度参数（`temperature`）并将 `max_tokens` 提升至 1024；翻译请求超时自动放宽至 90 秒、UI 超时保护放宽至 100 秒
+- **优化**：AI 翻译设置页滚动 — 设置窗口 AI 翻译页内容较多时超出窗口高度，改为 Canvas + Scrollbar 可滚动区域，鼠标滚轮可直接滚动
+- **修复**：下载完成判断过早导致文件移位和繁简转换不执行 — `_submit_direct` 中 task_id 边下载边注册（文件间 2 秒间隙），`poll_direct_progress` 在间隙中误判 `all_resolved=True` 提前标记 COMPLETED。改为下载前预生成所有 task_id 注册到 `task.direct_task_ids`，未开始的 task_id 在 `_download_progress` 中无条目 → poll 计为 `unresolved`，确保所有文件完成后才触发整理和转换
+- **修复**：`poll_direct_progress` 修改共享 `task_ids` 集合并行冲突 — 移除 `task_ids.discard()` 调用，改用只读快照迭代
+- **修复**：进度条左右跳动（11%→50%→4%） — `_poll_direct_task` 中 `completed_bytes` 改为 `max(task.completed_bytes, completed)` 历史最大值，配合 `peak_total_bytes` 实现进度只增不减
+- **修复**：`_auto_restart_slow_task` 不等待旧下载线程导致 `KeyError` 崩溃 — 新增 `thread.join(timeout=120)` 等待旧线程退出后再清理 `_download_progress`
+- **修复**：`download_file` 中 `_download_progress` 访问非防护崩溃 — 新增 `_set_progress()` 安全 helper，KeyError 时静默跳过代替崩溃；10 处不安全直接访问全部替换
+- **修复**：重试/重启场景残留进度数据 — `_retry_task` 和 `_auto_restart_slow_task` 重新提交前清理 `_download_progress` 旧记录，防止 poll 看到旧 "error" 状态立即触发无限重试循环
+
 ## v1.51.0
 
 - **新增**：VTT→LRC 字幕转换实现 — `subtitle_converter.py` 桩代码替换为完整实现：解析 VTT 时间戳（HH:MM:SS.mmm → [mm:ss.xx]）、跳过 WEBVTT 头部/NOTE/STYLE 块、移除 HTML 标签（`<c>` `<i>` `<b>` 等）、支持 UTF-8（含 BOM）和 Shift-JIS 编码、转换后自动删除原 `.vtt` 文件

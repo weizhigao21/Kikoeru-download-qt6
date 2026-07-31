@@ -207,12 +207,11 @@ class DownloadPollMixin:
         total, completed, speed, has_error, error_count, all_resolved = poll_direct_progress(task.direct_task_ids)
 
         with self._tasks_lock:
-            # 防止进度条跳动：total 只包含已注册的 task_id，
-            # 当一个文件完成、下一个文件还没注册时，total 会变小导致进度回退。
-            # 用历史最大值防止 total 下降。
+            # 防止进度条跳动：total 和 completed 均使用历史最大值，
+            # 避免新文件加入时 total 突然增大导致百分比下降。
             task.peak_total_bytes = max(task.peak_total_bytes, total)
             task.total_bytes = task.peak_total_bytes
-            task.completed_bytes = completed
+            task.completed_bytes = max(task.completed_bytes, completed)
             task.speed = speed
 
             # 未全部完成时，进度不超过 99.9%
@@ -339,6 +338,13 @@ class DownloadPollMixin:
             remove_aria2_downloads(task.gids)
             purge_aria2_downloads()
 
+        # 清理 _download_progress 中的旧进度记录，防止 poll 看到旧的 "error" 状态立即再次触发重试
+        if task.download_method == "direct" and task.direct_task_ids:
+            from .downloader_direct import _progress_lock, _download_progress
+            with _progress_lock:
+                for tid in task.direct_task_ids:
+                    _download_progress.pop(tid, None)
+
         with self._tasks_lock:
             task.gids.clear()
             task.direct_task_ids.clear()
@@ -385,6 +391,13 @@ class DownloadPollMixin:
             current = self.tasks.get(task.work_id)
             if not current or current.status != TaskStatus.DOWNLOADING:
                 return
+
+        # 等待旧下载线程结束，防止与 _download_progress 清理/新下载线程冲突
+        old_threads = task.download_threads
+        if old_threads:
+            for t in old_threads:
+                t.join(timeout=120)  # 大文件低速下载可能需要较长时间
+
         if task.download_method == "aria2":
             from .downloader import remove_aria2_downloads, purge_aria2_downloads
             remove_aria2_downloads(task.gids)
@@ -393,11 +406,7 @@ class DownloadPollMixin:
             from .downloader_direct import _progress_lock, _download_progress
             with _progress_lock:
                 for tid in list(task.direct_task_ids):
-                    p = _download_progress.get(tid, {})
-                    if p.get("status") not in ("complete", "error", "cancelled"):
-                        _download_progress[tid] = {
-                            **p, "status": "cancelled"
-                        }
+                    _download_progress.pop(tid, None)
         with self._tasks_lock:
             task.gids.clear()
             task.direct_task_ids.clear()

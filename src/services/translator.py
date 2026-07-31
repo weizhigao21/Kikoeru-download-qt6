@@ -22,7 +22,7 @@ class TranslatorService:
             "Content-Type": "application/json"
         })
 
-    def update_config(self, api_key: str, base_url: str, model: str):
+    def update_config(self, api_key: str, base_url: str, model: str, thinking_enabled: bool = True):
         """更新 API 配置"""
         self._api_key = api_key
         self._base_url = base_url.rstrip('/')
@@ -32,19 +32,23 @@ class TranslatorService:
                 break
         self._base_url = self._base_url.rstrip('/')
         self._model = model
+        self._thinking_enabled = thinking_enabled
         self._session.headers.update({
             "Authorization": f"Bearer {api_key}"
         })
 
-    def translate(self, text: str, callback: Callable[[Optional[str]], None], timeout: int = 30):
+    def translate(self, text: str, callback: Callable[[Optional[str]], None], timeout: Optional[int] = None):
         """
         异步翻译文本
 
         Args:
             text: 要翻译的文本
             callback: 翻译完成回调，参数为翻译结果或 None（失败时）
-            timeout: 翻译超时时间（秒），默认 30 秒
+            timeout: 翻译超时时间（秒）。None 时根据思考模式自动选择
+                     （思考模式 90 秒，普通模式 30 秒）
         """
+        if timeout is None:
+            timeout = 90 if getattr(self, '_thinking_enabled', True) else 30
         if not text or not text.strip():
             try:
                 callback(None)
@@ -84,6 +88,7 @@ class TranslatorService:
                 return
 
             url = f"{self._base_url}/chat/completions"
+            thinking_enabled = getattr(self, '_thinking_enabled', True)
             payload = {
                 "model": self._model,
                 "messages": [
@@ -96,9 +101,14 @@ class TranslatorService:
                         "content": f"请翻译以下文本：\n{text}"
                     }
                 ],
-                "temperature": 0.3,
-                "max_tokens": 500
+                "max_tokens": 1024 if thinking_enabled else 500
             }
+            if thinking_enabled:
+                # DeepSeek 思考模式：开启思考并限制推理强度；该模式下不支持 temperature
+                payload["thinking"] = {"type": "enabled"}
+                payload["reasoning_effort"] = "high"
+            else:
+                payload["temperature"] = 0.3
 
             response = self._session.post(
                 url,
