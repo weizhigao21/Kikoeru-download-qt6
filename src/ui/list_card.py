@@ -79,7 +79,7 @@ class ListCardMixin:
         title_frame = tk.Frame(text_frame, bg=colors["card_bg"])
         title_frame.pack(fill=tk.X, pady=(0, 4))
 
-        title_label = tk.Label(title_frame, text="", font=("Microsoft YaHei UI", 10, "bold"),
+        title_label = tk.Label(title_frame, text="", font=("Segoe UI", 10, "bold"),
                                cursor="hand2", bg=colors["card_bg"], fg=colors["text"], anchor=tk.W, wraplength=420)
         title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
