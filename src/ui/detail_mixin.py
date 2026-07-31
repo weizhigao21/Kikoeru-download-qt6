@@ -48,7 +48,7 @@ class DetailMixin(DetailActionsMixin):
         detail_title_frame.pack(anchor=tk.W, fill=tk.X, pady=(0, 10))
 
         self.info_labels["title"] = ttk.Label(
-            detail_title_frame, text="", font=("Segoe UI", 11), wraplength=320, justify=tk.LEFT
+            detail_title_frame, text="", font=("Microsoft JhengHei UI", 11), wraplength=320, justify=tk.LEFT
         )
         self.info_labels["title"].pack(side=tk.LEFT, fill=tk.X, expand=True)
 
