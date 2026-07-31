@@ -1,6 +1,7 @@
 ## v1.53.0
 
 - **修复**：下载完成主界面底部进度框空边框残留 — `_refresh_task_display` 中无活跃任务时未隐藏 `dl_task_frame` 容器（带 `relief=tk.SOLID, bd=1` 边框），所有下载完成后留一个空白的边框框框。修复后在 `_refresh_task_display` 末尾根据是否有活跃任务 `grid()` / `grid_remove()` 整个容器
+- **修复**：作品标题 `♡` 等特殊符号显示乱码 — 列表卡片和详情面板标题标签字体从 `Microsoft YaHei UI` 改为 `Segoe UI`，后者 Unicode 覆盖更广，可正确渲染 ♡、★、♪ 等特殊符号
 
 ## v1.52.0
 
