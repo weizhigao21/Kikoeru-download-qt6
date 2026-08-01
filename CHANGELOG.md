@@ -1,3 +1,9 @@
+## v1.54.0
+
+- **修复**：下载任务进行中时打开新作品下载窗口卡顿约 20 秒 — `fetch_tracks` 是唯一未走缓存/去重路径的 API 函数，每次打开下载窗口都重新请求网络；当已有下载任务占满带宽时，请求超时（15s）+ 重试退避累计约 20s。改为走 `_fetch_or_dedup`，与 `fetch_work_detail` 等其他 API 函数一致，重复打开同一作品秒开（120s LRU 缓存 + 并发去重）
+- **修复**：下载管理窗口 observer 跨线程操作 tkinter 导致 UI 卡顿 — `DownloadManagerWindow._refresh` 作为 observer 在轮询线程被直接调用并操作 widget，违反 tkinter 线程安全，与主线程竞争 Tcl 解释器锁。新增 `_schedule_refresh` 方法，用 `window.after(0, ...)` 将刷新调度到主线程执行（与主窗口 `_on_dl_tasks_changed` 一致）
+- **新增**：`load_tracks` 增加 `fetch_tracks` 耗时日志，便于定位下载窗口文件列表加载延迟
+
 ## v1.53.0
 
 - **修复**：下载完成主界面底部进度框空边框残留 — `_refresh_task_display` 中无活跃任务时未隐藏 `dl_task_frame` 容器（带 `relief=tk.SOLID, bd=1` 边框），所有下载完成后留一个空白的边框框框。修复后在 `_refresh_task_display` 末尾根据是否有活跃任务 `grid()` / `grid_remove()` 整个容器

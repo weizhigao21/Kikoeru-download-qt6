@@ -195,12 +195,21 @@ def fetch_work_detail(rj_id):
 
 
 def fetch_tracks(rj_id):
-    if str(rj_id).startswith("RJ"):
-        rj_id = str(rj_id)[2:]
-    rj_id = str(int(rj_id))
-    url = f"{API_BASE_URL}/tracks/{rj_id}"
-    params = {"v": "2"}
-    return _request_with_retry("GET", url, params=params)
+    key = _cache_key("tracks", rj_id)
+
+    def do_fetch():
+        rid = rj_id
+        if str(rid).startswith("RJ"):
+            rid = str(rid)[2:]
+        rid = str(int(rid))
+        url = f"{API_BASE_URL}/tracks/{rid}"
+        params = {"v": "2"}
+        data = _request_with_retry("GET", url, params=params)
+        if data:
+            _cache.put(key, data)
+        return data
+
+    return _fetch_or_dedup(key, do_fetch)
 
 
 def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE):

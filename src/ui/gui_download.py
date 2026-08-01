@@ -1,10 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
+import time
+import logging
 
 from ..api_client import get_api_client
 from ..download.manager import DownloadManager
 from .tree_selector import TreeSelector
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadWindow:
@@ -94,11 +98,14 @@ class DownloadWindow:
         if not source_id:
             return
 
+        t0 = time.time()
         try:
             api_client = get_api_client()
             self.tracks_data = api_client.fetch_tracks(source_id)
+            logger.info("fetch_tracks 耗时 %.1fs (source_id=%s)", time.time() - t0, source_id)
             self.window.after(0, self.display_tree)
         except Exception as e:
+            logger.warning("fetch_tracks 失败 %.1fs: %s", time.time() - t0, e)
             self.window.after(0, self.show_error, f"加载失败: {str(e)}")
 
     def display_tree(self):

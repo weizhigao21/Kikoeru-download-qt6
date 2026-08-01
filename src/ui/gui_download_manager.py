@@ -38,8 +38,15 @@ class DownloadManagerWindow:
         self._empty_done_label = None
 
         self._create_ui()
-        self.dl_manager.add_observer(self._refresh)
+        self.dl_manager.add_observer(self._schedule_refresh)
         self._switch_tab("active")
+
+    def _schedule_refresh(self):
+        """observer 在轮询线程被调用，需将 UI 刷新调度到主线程执行"""
+        try:
+            self.window.after(0, self._refresh)
+        except Exception:
+            pass
 
     def _create_ui(self):
         c = self.colors
@@ -352,7 +359,7 @@ class DownloadManagerWindow:
 
     def _on_close(self):
         try:
-            self.dl_manager.remove_observer(self._refresh)
+            self.dl_manager.remove_observer(self._schedule_refresh)
         except Exception:
             pass
         try:
