@@ -1,3 +1,10 @@
+## v1.60.0
+
+- **新增**：作品文件树(tracks)持久化缓存 — 双击作品弹出的下载窗口文件树原本只有内存缓存（`_APICache` TTL 120 秒），重启或超时后重新打开都要重新请求 API。新建 `WorkTracksManager`（`src/database/tracks.py`）将完整 tracks JSON（含 `mediaDownloadUrl`）持久化到 `download_history.db` 的 `work_tracks` 表。`DownloadWindow.load_tracks`（`gui_download.py:102`）改为三层查询（内存缓存 → DB 缓存 → API 拉取并落库），首次打开后再次双击同一作品秒级加载、无 API 请求。DB 复用 `DOWNLOAD_HISTORY_DB_PATH`，与 `pending_tasks` 共库
+- **新增**：下载窗口"刷新"按钮 — 永久缓存策略下的手动刷新机制。点击强制绕过缓存重新请求 API 拉取文件列表并更新 DB 缓存，后台线程执行不阻塞 UI
+- **新增**：下载 URL 失效自动回退 — tracks 里的 `mediaDownloadUrl` 可能因 CDN 签名/token 过期失效，原重试机制用原始 URL 反复重试必然失败。`_retry_task`（`manager_poll.py`）首次自动重试前调 `_refresh_task_urls` 重新拉取 tracks，按 `(subfolder, filename)` 映射键替换 `task.files` 的 URL；新增 `DownloadTask.urls_refreshed` 字段保证只刷新一次（无论成败都置 True，避免每次重试都打 API）；刷新失败降级为原重试行为。`_iter_tracks_leaves` 路径构造与 `gui_download.py` 的 `process_node` 一致（含 `unknown` 节点不拼接 title 的特殊处理）
+- **修复**：`gui_app.py` `_on_close` 漏关 `pending_task_db` 连接 — `close_all` 是实例级（`BaseDatabaseManager` 每实例独立 `_all_conns` 注册表），原代码只 close 了 `db` 和 `download_history`，`pending_task_db` 的工作线程连接泄漏。补上 `pending_task_db` 及新增 `tracks_db` 的 close_all
+
 ## v1.59.3
 
 - **重构**：字体集中管理模块 `src/ui/fonts.py` — UI 层字体声明原本散落在 8 个文件、92 处硬编码元组（如 `("Microsoft YaHei UI", 10)`），每次调整字体需全局搜索替换，易漏改。新建 `fonts.py` 集中定义 3 个字体族常量（`UI_FONT_FAMILY`/`MONO_FONT_FAMILY`/`EMOJI_FONT_FAMILY`）+ 11 个语义化字体元组（`DEFAULT`/`SMALL`/`BODY`/`TITLE_BOLD`/`MONO_ID`/`EMOJI` 等），8 个 UI 文件改为导入常量。今后改字体族只需改 `fonts.py` 一处

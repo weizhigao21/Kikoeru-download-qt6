@@ -16,6 +16,7 @@ from src import (
     CACHE_DIR, DB_PATH, DOWNLOAD_HISTORY_DB_PATH, ICON_PATH,
     DOWNLOAD_DIR,
     ImageCacheManager, DatabaseManager, DownloadHistoryManager, PendingTaskManager,
+    WorkTracksManager,
     get_api_client, DownloadWindow, SettingsWindow, DownloadManagerWindow
 )
 from src.download.manager import DownloadManager
@@ -66,10 +67,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
         self.db = DatabaseManager(DB_PATH)
         self.download_history = DownloadHistoryManager(DOWNLOAD_HISTORY_DB_PATH)
         self.pending_task_db = PendingTaskManager(DOWNLOAD_HISTORY_DB_PATH)
+        self.tracks_db = WorkTracksManager(DOWNLOAD_HISTORY_DB_PATH)
 
         self.dl_manager = DownloadManager()
         self.dl_manager.set_download_history(self.download_history)
         self.dl_manager.set_pending_db(self.pending_task_db)
+        self.dl_manager.set_tracks_cache(self.tracks_db)
         self.dl_manager.add_observer(self._on_dl_tasks_changed)
         self.dl_manager.set_queue_mode(_config.QUEUE_MODE, _config.MAX_CONCURRENT_DOWNLOADS)
 
@@ -159,7 +162,7 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
             self.status_label.config(text=f"重试失败: {work_id}")
 
     def open_download_window(self, work, display_title=None):
-        self._dl_win = DownloadWindow(self.root, work, self.downloaded_ids_cache, display_title)
+        self._dl_win = DownloadWindow(self.root, work, self.downloaded_ids_cache, display_title, self.tracks_db)
 
     def _format_size(self, size):
         if size < 1024:
@@ -201,6 +204,10 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
                 self.db.close_all()
             if hasattr(self.download_history, "close_all"):
                 self.download_history.close_all()
+            if hasattr(self.pending_task_db, "close_all"):
+                self.pending_task_db.close_all()
+            if hasattr(self.tracks_db, "close_all"):
+                self.tracks_db.close_all()
         except Exception as e:
             logger.exception("关闭数据库异常: %s", e)
         finally:

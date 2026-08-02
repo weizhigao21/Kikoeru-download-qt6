@@ -39,6 +39,7 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         self._max_concurrent = 1
         self._queue_mode = False
         self._pending_db = None
+        self.tracks_cache = None
 
         import src.config as _cfg
         self._SLOW_SPEED_THRESHOLD = _cfg.SLOW_SPEED_THRESHOLD * 1024 * 1024
@@ -59,6 +60,9 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
 
     def set_pending_db(self, pdb):
         self._pending_db = pdb
+
+    def set_tracks_cache(self, cache):
+        self.tracks_cache = cache
 
     def set_queue_mode(self, enabled, max_concurrent=1):
         self._queue_mode = enabled

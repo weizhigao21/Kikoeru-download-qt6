@@ -39,3 +39,5 @@ class DownloadTask:
     last_completed: int = 0
     # 下载线程管理
     download_threads: list = field(default_factory=list)
+    # URL 回退刷新标记：首次自动重试时刷新一次 tracks URL，避免重复打 API
+    urls_refreshed: bool = False

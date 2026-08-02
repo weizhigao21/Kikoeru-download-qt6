@@ -20,11 +20,12 @@ class DownloadWindow:
     ICON_TEXT = "\U0001F4C4"
     ICON_UNKNOWN = "\U0001F4E6"
 
-    def __init__(self, parent, work, downloaded_ids_cache=None, display_title=None):
+    def __init__(self, parent, work, downloaded_ids_cache=None, display_title=None, tracks_cache=None):
         self.parent = parent
         self.work = work
         self.display_title = display_title
         self.downloaded_ids_cache = downloaded_ids_cache
+        self.tracks_cache = tracks_cache
         self.download_tasks = {}
         self.tracks_data = None
         self.item_folder_path = {}
@@ -75,6 +76,9 @@ class DownloadWindow:
                                        style="Download.TButton")
         self.download_btn.pack(side=tk.LEFT, padx=5)
 
+        self.refresh_btn = ttk.Button(toolbar, text="刷新", command=self._on_refresh_tracks)
+        self.refresh_btn.pack(side=tk.LEFT, padx=5)
+
         self.progress_label = tk.Label(toolbar, text="", font=SMALL, bg="#f0f0f0")
         self.progress_label.pack(side=tk.LEFT, padx=10)
 
@@ -95,20 +99,48 @@ class DownloadWindow:
 
         threading.Thread(target=self.load_tracks, daemon=True).start()
 
-    def load_tracks(self):
+    def load_tracks(self, force_refresh=False):
         source_id = self.work.get("source_id", "")
         if not source_id:
             return
 
         t0 = time.time()
         try:
+            # 第一层：DB 缓存（非强制刷新时命中即展示，避免打 API）
+            if not force_refresh and self.tracks_cache is not None:
+                cached = self.tracks_cache.get_tracks(source_id)
+                if cached is not None:
+                    self.tracks_data = cached
+                    logger.info("[tracks] 命中 DB 缓存 (source_id=%s)", source_id)
+                    self.window.after(0, self.display_tree)
+                    return
+            # 第二层：API 拉取
             api_client = get_api_client()
             self.tracks_data = api_client.fetch_tracks(source_id)
             logger.info("fetch_tracks 耗时 %.1fs (source_id=%s)", time.time() - t0, source_id)
+            # 第三层：落库
+            if self.tracks_data is not None and self.tracks_cache is not None:
+                try:
+                    self.tracks_cache.save_tracks(source_id, self.tracks_data, self.work.get("title", ""))
+                except Exception:
+                    logger.exception("[tracks] save_tracks 失败: %s", source_id)
             self.window.after(0, self.display_tree)
         except Exception as e:
             logger.warning("fetch_tracks 失败 %.1fs: %s", time.time() - t0, e)
             self.window.after(0, self.show_error, f"加载失败: {str(e)}")
+
+    def _on_refresh_tracks(self):
+        """强制重新拉取文件列表并更新 DB 缓存。"""
+        self.refresh_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="正在刷新文件列表...")
+
+        def run():
+            try:
+                self.load_tracks(force_refresh=True)
+            finally:
+                self.window.after(0, lambda: self.refresh_btn.config(state=tk.NORMAL))
+
+        threading.Thread(target=run, daemon=True).start()
 
     def display_tree(self):
         self.tree.delete(*self.tree.get_children())

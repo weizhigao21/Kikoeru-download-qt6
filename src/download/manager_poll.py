@@ -8,6 +8,37 @@ from .models import TaskStatus
 logger = logging.getLogger(__name__)
 
 
+def _iter_tracks_leaves(tracks_data):
+    """遍历 tracks 树 yield (subfolder, filename, url)。
+
+    路径构造必须与 gui_download.py 的 DownloadWindow.process_node 保持一致：
+    - folder: folder_path = current_path + title + "/"，递归子节点用 folder_path
+    - leaf (audio/image/text): subfolder = current_path, filename = node.title
+    - unknown: 递归 children，current_path 不变（不拼接 title）
+    - tracks_data 可能是 list（多根）或 dict（单根），两种都处理
+    """
+    def walk(node, current_path):
+        node_type = node.get("type", "")
+        title = node.get("title", "")
+        if node_type == "folder":
+            folder_path = current_path + title + "/"
+            for child in node.get("children", []):
+                yield from walk(child, folder_path)
+        elif node_type in ("audio", "image", "text"):
+            url = node.get("mediaDownloadUrl") or node.get("mediaStreamUrl")
+            yield (current_path, node.get("title", "未命名"), url)
+        else:
+            # unknown 类型：递归 children，current_path 不变（与 process_node 一致）
+            for child in node.get("children", []):
+                yield from walk(child, current_path)
+
+    if isinstance(tracks_data, list):
+        for node in tracks_data:
+            yield from walk(node, "")
+    else:
+        yield from walk(tracks_data, "")
+
+
 class DownloadPollMixin:
     def _poll_loop(self):
         idle_cycles = 0
@@ -355,6 +386,42 @@ class DownloadPollMixin:
             task.download_threads = []
             task.peak_total_bytes = 0
 
+    def _refresh_task_urls(self, task):
+        """重新拉取 tracks 并刷新 task.files 的 url（URL 失效回退）。
+
+        失败时返回 False 且不修改 task.files，退化为原重试行为。
+        """
+        source_id = task.work.get("source_id", "")
+        if not source_id:
+            return False
+        try:
+            from ..api_client import get_api_client
+            new_tracks = get_api_client().fetch_tracks(source_id)
+            if not new_tracks:
+                return False
+            if self.tracks_cache is not None:
+                try:
+                    self.tracks_cache.save_tracks(source_id, new_tracks, task.work.get("title", ""))
+                except Exception:
+                    logger.exception("[URL刷新] save_tracks 失败: %s", source_id)
+            url_map = {}
+            for subfolder, filename, url in _iter_tracks_leaves(new_tracks):
+                if url:
+                    url_map[(subfolder, filename)] = url
+            if not url_map:
+                return False
+            refreshed = 0
+            for f in task.files:
+                new_url = url_map.get((f.get("subfolder", ""), f.get("filename", "未命名")))
+                if new_url:
+                    f["url"] = new_url
+                    refreshed += 1
+            logger.info("[URL刷新] %s 刷新 %d/%d 个 URL", source_id, refreshed, len(task.files))
+            return refreshed > 0
+        except Exception:
+            logger.exception("[URL刷新] %s 失败，降级为原 URL", source_id)
+            return False
+
     def _retry_task(self, task):
         import random
 
@@ -364,6 +431,14 @@ class DownloadPollMixin:
 
         # 提取公共清理逻辑（重试等待 30s，低速重启 120s）
         self._cleanup_and_reset_task(task, thread_join_timeout=30)
+
+        # URL 回退：仅首次自动重试刷新一次，无论成败都标记避免重复打 API
+        if not task.urls_refreshed:
+            task.urls_refreshed = True
+            try:
+                self._refresh_task_urls(task)
+            except Exception:
+                logger.exception("[重试] URL 刷新异常，降级")
 
         self._submit_task(task.work, task.files, task)
 
