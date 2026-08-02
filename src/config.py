@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import logging
 
 _DEFAULT_CONFIG = {
     "api_url": "https://api.asmr-200.com/api/recommender/recommend-for-user",
@@ -49,7 +50,7 @@ _USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) el
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v1.54.0"
+VERSION = "v1.59.3"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -60,7 +61,10 @@ _cfg = {}
 try:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         _cfg = json.load(f)
-except Exception:
+except FileNotFoundError:
+    pass  # 首次运行，配置文件尚未创建
+except Exception as e:
+    logging.getLogger(__name__).warning("配置文件解析失败，使用默认配置: %s", e)
     _cfg = {}
 
 for key, default in _DEFAULT_CONFIG.items():
@@ -74,7 +78,7 @@ ARIA2_RPC_URL = _cfg["aria2_rpc_url"]
 
 CONFIG_DIR = SETTINGS_DIR
 CACHE_DIR = os.path.join(_APP_ROOT, "image_cache")
-db_dir_cfg = _cfg.get("db_dir", "")
+db_dir_cfg = _cfg["db_dir"]
 if db_dir_cfg:
     DB_DIR = db_dir_cfg if os.path.isabs(db_dir_cfg) else os.path.join(_APP_ROOT, db_dir_cfg)
 else:
@@ -88,39 +92,21 @@ DOWNLOAD_DIR = download_dir_cfg if os.path.isabs(download_dir_cfg) else os.path.
 aria2_dir_cfg = _cfg["aria2_dir"]
 ARIA2_DIR = aria2_dir_cfg if os.path.isabs(aria2_dir_cfg) else os.path.join(_APP_ROOT, aria2_dir_cfg)
 
-AI_TRANSLATE_ENABLED = _cfg.get("ai_translate_enabled", False)
-AI_API_KEY = _cfg.get("ai_api_key", "")
-AI_API_BASE_URL = _cfg.get("ai_api_base_url", "https://api.openai.com/v1")
-AI_MODEL = _cfg.get("ai_model", "gpt-3.5-turbo")
-AI_THINKING_ENABLED = _cfg.get("ai_thinking_enabled", True)
-AI_TRANSLATE_EDITABLE = _cfg.get("ai_translate_editable", True)
+AI_TRANSLATE_ENABLED = _cfg["ai_translate_enabled"]
+AI_API_KEY = _cfg["ai_api_key"]
+AI_API_BASE_URL = _cfg["ai_api_base_url"]
+AI_MODEL = _cfg["ai_model"]
+AI_THINKING_ENABLED = _cfg["ai_thinking_enabled"]
+AI_TRANSLATE_EDITABLE = _cfg["ai_translate_editable"]
 
-DOWNLOAD_METHOD = _cfg.get("download_method", "aria2")
-DIRECT_DOWNLOAD_THREADS = _cfg.get("direct_download_threads", 3)
-QUEUE_MODE = _cfg.get("queue_mode", False)
-MAX_CONCURRENT_DOWNLOADS = _cfg.get("max_concurrent_downloads", 1)
-FILENAME_FILTER_CHARS = _cfg.get("filename_filter_chars", "")
-SLOW_SPEED_THRESHOLD = _cfg.get("slow_speed_threshold", 1)
-SLOW_SPEED_DURATION = _cfg.get("slow_speed_duration", 10)
-MAX_SLOW_RESTARTS = _cfg.get("max_slow_restarts", 3)
-SUBTITLE_CONVERT_ENABLED = _cfg.get("subtitle_convert_enabled", True)
-AUTO_FLATTEN_ENABLED = _cfg.get("auto_flatten_enabled", True)
-TRADITIONAL_TO_SIMPLIFIED_ENABLED = _cfg.get("traditional_to_simplified_enabled", True)
-
-
-def _friendly_error(msg: str) -> str:
-    """将技术错误信息转换为用户友好的提示"""
-    msg_lower = msg.lower()
-    if "timeout" in msg_lower or "timed out" in msg_lower:
-        return "网络连接超时，请检查网络设置"
-    if "connection" in msg_lower and "refused" in msg_lower:
-        return "网络连接失败，请检查网络设置"
-    if "429" in msg:
-        return "请求过于频繁，请稍后再试"
-    if "404" in msg:
-        return "请求的资源不存在"
-    if "500" in msg or "502" in msg or "503" in msg:
-        return "服务器暂时不可用，请稍后再试"
-    if "dns" in msg_lower or "name resolution" in msg_lower:
-        return "网络连接失败，请检查网络设置"
-    return msg
+DOWNLOAD_METHOD = _cfg["download_method"]
+DIRECT_DOWNLOAD_THREADS = _cfg["direct_download_threads"]
+QUEUE_MODE = _cfg["queue_mode"]
+MAX_CONCURRENT_DOWNLOADS = _cfg["max_concurrent_downloads"]
+FILENAME_FILTER_CHARS = _cfg["filename_filter_chars"]
+SLOW_SPEED_THRESHOLD = _cfg["slow_speed_threshold"]
+SLOW_SPEED_DURATION = _cfg["slow_speed_duration"]
+MAX_SLOW_RESTARTS = _cfg["max_slow_restarts"]
+SUBTITLE_CONVERT_ENABLED = _cfg["subtitle_convert_enabled"]
+AUTO_FLATTEN_ENABLED = _cfg["auto_flatten_enabled"]
+TRADITIONAL_TO_SIMPLIFIED_ENABLED = _cfg["traditional_to_simplified_enabled"]

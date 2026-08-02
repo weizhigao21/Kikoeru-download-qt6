@@ -28,14 +28,15 @@ def _vtt_timestamp_to_lrc(timestamp_str: str) -> str:
     millis = int(m.group(4))
 
     total_minutes = hours * 60 + minutes
+    # 修正进位逻辑：round(millis/10) 可能等于 100（如 millis=999 → 100）
+    # 原代码 (centis % 100) // 100 错误地始终返回 0，导致秒数不进位
     centiseconds = round(millis / 10)
     if centiseconds >= 100:
-        total_minutes += centiseconds // 100
-        seconds += (centiseconds % 100) // 100
-        centiseconds = centiseconds % 100
-        if seconds >= 60:
-            total_minutes += seconds // 60
-            seconds = seconds % 60
+        seconds += centiseconds // 100  # centis=100 → seconds+1
+        centiseconds = centiseconds % 100  # centis=100 → 0
+    if seconds >= 60:
+        total_minutes += seconds // 60
+        seconds = seconds % 60
 
     return f"[{total_minutes:02d}:{seconds:02d}.{centiseconds:02d}]"
 
@@ -71,8 +72,9 @@ def convert_vtt_to_lrc(vtt_content: str) -> str:
     for line_raw in lines:
         line = line_raw.strip()
 
-        # 跳过 WEBVTT 头部、空行、NOTE / STYLE / REGION 块
+        # 空行：结束 NOTE 块（VTT 规范：NOTE 块持续到下一个空行）
         if not line:
+            in_note_block = False
             continue
         if _WEBVTT_HEADER_RE.match(line):
             continue
@@ -82,13 +84,9 @@ def convert_vtt_to_lrc(vtt_content: str) -> str:
         if _STYLE_BLOCK_RE.match(line) or _REGION_BLOCK_RE.match(line):
             continue
 
-        # NOTE 块内的行全部跳过
+        # NOTE 块内的行全部跳过（直到空行结束）
         if in_note_block:
-            if line.startswith('\t') or line.startswith('  '):
-                continue
-            else:
-                in_note_block = False
-                continue
+            continue
 
         # 检查是否是时间戳行: "00:01.000 --> 00:04.000"
         if '-->' in line:

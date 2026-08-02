@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import ttk
 
+from src.download.models import TaskStatus
+from src.ui.fonts import DEFAULT, DEFAULT_BOLD, SMALL, BODY, TITLE_BOLD, MONO_ID, MONO_NUM, TINY
+
 
 class UISetupMixin:
     def _setup_styles(self):
@@ -22,9 +25,9 @@ class UISetupMixin:
             "hover": "#e8e8e8",
         }
 
-        default_font = ("Microsoft YaHei UI", 10)
-        bold_font = ("Microsoft YaHei UI", 10, "bold")
-        small_font = ("Microsoft YaHei UI", 9)
+        default_font = DEFAULT
+        bold_font = DEFAULT_BOLD
+        small_font = SMALL
 
         style.configure(".", font=default_font, background=self.COLORS["bg"])
         style.configure("TLabel", font=default_font, padding=2, background=self.COLORS["bg"])
@@ -55,17 +58,29 @@ class UISetupMixin:
         self.root.option_add("*Foreground", self.COLORS["text"])
 
     def setup_ui(self):
+        """构建主界面：顶部控件栏 + 左侧列表 + 右侧详情 + 底部任务栏。"""
         colors = self.COLORS
 
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        control_frame = ttk.Frame(main_frame)
+        self._build_top_bar(main_frame, colors)
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self._build_list_area(content_frame, colors)
+        self._build_detail_area(content_frame, colors)
+        self._build_bottom_bar(main_frame, colors)
+
+        self.info_labels = {}
+        self.setup_detail_panel()
+
+    def _build_top_bar(self, parent, colors):
+        control_frame = ttk.Frame(parent)
         control_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
 
         self.tab_var = tk.StringVar(value="推荐作品")
         self.tab_combo = ttk.Combobox(control_frame, textvariable=self.tab_var, width=12,
-                                       font=("Microsoft YaHei UI", 10), state="readonly")
+                                       font=DEFAULT, state="readonly")
         self.tab_combo['values'] = ("推荐作品", "最新收录", "下载作品")
         self.tab_combo.pack(side=tk.LEFT)
         self.tab_combo.bind("<<ComboboxSelected>>", self._on_tab_changed)
@@ -76,41 +91,40 @@ class UISetupMixin:
         self.refresh_btn = ttk.Button(control_frame, text="刷新", command=self.refresh_data)
         self.refresh_btn.pack(side=tk.LEFT, padx=(20, 5))
 
-        ttk.Label(control_frame, text="搜索:", font=("Microsoft YaHei UI", 11)).pack(side=tk.LEFT, padx=(20, 5))
+        ttk.Label(control_frame, text="搜索:", font=BODY).pack(side=tk.LEFT, padx=(20, 5))
         self.search_container = tk.Frame(control_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
         self.search_container.pack(side=tk.LEFT, padx=5)
 
         self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(self.search_container, textvariable=self.search_var, width=20, font=("Microsoft YaHei UI", 11))
+        self.search_entry = ttk.Entry(self.search_container, textvariable=self.search_var, width=20, font=BODY)
         self.search_entry.pack(side=tk.LEFT, padx=5, pady=3)
         self.search_entry.bind("<Return>", lambda e: self.do_search())
 
+        # 标签/关键词/厂商芯片容器，后续由 SearchMixin 按 pack(side=tk.LEFT) 布局管理
         self.search_tags_frame = tk.Frame(self.search_container, bg=colors["card_bg"])
         ttk.Button(control_frame, text="搜索", command=self.do_search).pack(side=tk.LEFT, padx=5)
 
-        self.downloaded_count_label = ttk.Label(control_frame, text="", font=("Microsoft YaHei UI", 9), foreground=colors["text_secondary"])
+        self.downloaded_count_label = ttk.Label(control_frame, text="", font=SMALL, foreground=colors["text_secondary"])
         self.downloaded_count_label.pack(side=tk.LEFT, padx=(0, 10))
 
         self.hide_dl_btn = ttk.Button(control_frame, text="显示全部", command=self._toggle_hide_downloaded)
         self.hide_dl_btn.pack(side=tk.LEFT, padx=(10, 5))
         self._hide_downloaded = False
 
-        self.sort_label = ttk.Label(control_frame, text="排序:", font=("Microsoft YaHei UI", 10))
+        self.sort_label = ttk.Label(control_frame, text="排序:", font=DEFAULT)
         self.sort_label.pack(side=tk.LEFT, padx=(10, 5))
         self.sort_var = tk.StringVar(value="下载时间最新")
         self.sort_combo = ttk.Combobox(control_frame, textvariable=self.sort_var, width=15,
-                                        font=("Microsoft YaHei UI", 10), state="readonly")
+                                        font=DEFAULT, state="readonly")
         self.sort_combo['values'] = ("下载时间最新", "下载时间最旧", "标题 A-Z", "标题 Z-A", "ID 从小到大", "ID 从大到小")
         self.sort_combo.pack(side=tk.LEFT, padx=5)
         self.sort_combo.bind("<<ComboboxSelected>>", lambda e: self._on_sort_changed())
 
-        self.status_label = ttk.Label(control_frame, text="", font=("Microsoft YaHei UI", 10), foreground=colors["text_hint"])
+        self.status_label = ttk.Label(control_frame, text="", font=DEFAULT, foreground=colors["text_hint"])
         self.status_label.pack(side=tk.RIGHT)
 
-        content_frame = ttk.Frame(main_frame)
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-
-        left_frame = tk.Frame(content_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
+    def _build_list_area(self, parent, colors):
+        left_frame = tk.Frame(parent, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
         self.canvas = tk.Canvas(left_frame, bg=colors["card_bg"], highlightthickness=0)
@@ -131,11 +145,19 @@ class UISetupMixin:
             self._on_frame_configure
         )
 
-        right_frame = tk.Frame(content_frame, width=400, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
+    def _build_detail_area(self, parent, colors):
+        right_frame = tk.Frame(parent, width=400, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(10, 0))
         right_frame.pack_propagate(False)
 
-        bottom_frame = tk.Frame(main_frame, bg=colors["bg"])
+        tk.Label(right_frame, text="当前作品", font=TITLE_BOLD,
+                 bg=colors["card_bg"], fg=colors["text"]).pack(pady=(10, 10))
+
+        self.detail_frame = tk.Frame(right_frame, bg=colors["card_bg"])
+        self.detail_frame.pack(fill=tk.BOTH, expand=True)
+
+    def _build_bottom_bar(self, parent, colors):
+        bottom_frame = tk.Frame(parent, bg=colors["bg"])
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
         bottom_frame.columnconfigure(0, weight=0)
         bottom_frame.columnconfigure(1, weight=0)
@@ -145,12 +167,12 @@ class UISetupMixin:
         self.dl_task_frame = tk.Frame(bottom_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
         self.dl_task_frame.grid(row=0, column=1, sticky="w")
         self._dl_mgr_win = None
+        self._settings_win = None
         self._dl_task_slots = []
-        for i in range(1):
-            slot = self._create_task_slot()
-            slot["frame"].grid(row=i, column=0, sticky="ew")
-            slot["frame"].grid_remove()
-            self._dl_task_slots.append(slot)
+        slot = self._create_task_slot()
+        slot["frame"].grid(row=0, column=0, sticky="ew")
+        slot["frame"].grid_remove()
+        self._dl_task_slots.append(slot)
 
         self.dl_mgr_btn = ttk.Button(bottom_frame, text="下载管理", command=self.open_download_manager)
         self.dl_mgr_btn.grid(row=0, column=0, padx=(5, 10), pady=2)
@@ -163,7 +185,7 @@ class UISetupMixin:
 
         self.page_var = tk.StringVar(value="1")
         ttk.Label(btn_container, text="页码:").pack(side=tk.LEFT, padx=(5, 2))
-        self.page_entry = ttk.Entry(btn_container, textvariable=self.page_var, width=8, font=("Microsoft YaHei UI", 10))
+        self.page_entry = ttk.Entry(btn_container, textvariable=self.page_var, width=8, font=DEFAULT)
         self.page_entry.pack(side=tk.LEFT, padx=2)
         self.page_entry.bind("<Return>", lambda e: self.go_to_page())
         ttk.Button(btn_container, text="跳转", command=self.go_to_page).pack(side=tk.LEFT, padx=2)
@@ -174,15 +196,6 @@ class UISetupMixin:
         self.settings_btn = ttk.Button(bottom_frame, text="设置", command=self.open_settings)
         self.settings_btn.grid(row=0, column=3, sticky="e", padx=(10, 5))
 
-        tk.Label(right_frame, text="当前作品", font=("Microsoft YaHei UI", 14, "bold"),
-                 bg=colors["card_bg"], fg=colors["text"]).pack(pady=(10, 10))
-
-        self.detail_frame = tk.Frame(right_frame, bg=colors["card_bg"])
-        self.detail_frame.pack(fill=tk.BOTH, expand=True)
-
-        self.info_labels = {}
-        self.setup_detail_panel()
-
     def _bump_generation(self):
         self._nav_generation += 1
 
@@ -190,15 +203,15 @@ class UISetupMixin:
         colors = self.COLORS
         row = tk.Frame(self.dl_task_frame, bg=colors["card_bg"])
 
-        id_label = tk.Label(row, font=("Consolas", 9, "bold"),
+        id_label = tk.Label(row, font=MONO_ID,
                             bg=colors["card_bg"], fg=colors["primary"], width=12, anchor=tk.W)
         id_label.pack(side=tk.LEFT, padx=(5, 5))
 
-        pct_label = tk.Label(row, font=("Consolas", 10),
+        pct_label = tk.Label(row, font=MONO_NUM,
                              bg=colors["card_bg"], fg=colors["text"], width=5)
         pct_label.pack(side=tk.LEFT)
 
-        speed_label = tk.Label(row, font=("Microsoft YaHei UI", 8),
+        speed_label = tk.Label(row, font=TINY,
                                bg=colors["card_bg"], fg=colors["text_hint"], width=10)
         speed_label.pack(side=tk.LEFT, padx=(5, 0))
 
@@ -215,13 +228,15 @@ class UISetupMixin:
         self.root.after(0, self._update_downloaded_count)
         tasks = self.dl_manager.get_all_tasks()
         completed_or_failed = [t for t in tasks
-                              if t.status.value in ("completed", "failed")]
+                              if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)]
         if completed_or_failed:
-            self._downloaded_cache_valid = False
+            # 缓存失效标记同样调度到主线程，与 _refresh_task_display 保持一致的线程安全策略
+            self.root.after(0, lambda: setattr(self, "_downloaded_cache_valid", False))
 
     def _refresh_task_display(self):
         tasks = self.dl_manager.get_all_tasks()
-        active_tasks = [t for t in tasks if t.status.value in ("submitting", "downloading")]
+        active_tasks = [t for t in tasks
+                        if t.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.CONVERTING)]
 
         while len(self._dl_task_slots) < len(active_tasks):
             new_slot = self._create_task_slot()
@@ -237,8 +252,10 @@ class UISetupMixin:
                 if task.total_bytes > 0:
                     pct = min(int(task.completed_bytes * 100 / task.total_bytes), 100)
                     slot["pct_label"].config(text=f"{pct}%")
-                elif task.status.value == "submitting":
+                elif task.status == TaskStatus.SUBMITTING:
                     slot["pct_label"].config(text="提交中")
+                elif task.status == TaskStatus.CONVERTING:
+                    slot["pct_label"].config(text="转换中")
                 elif task.total_files > 0:
                     slot["pct_label"].config(text="下载中")
                 else:
@@ -265,7 +282,29 @@ class UISetupMixin:
 
     def open_settings(self):
         from src.ui.gui_settings import SettingsWindow
-        self._settings_win = SettingsWindow(self.root, image_cache=self.image_cache)
+
+        if self._settings_win is not None:
+            try:
+                if self._settings_win.winfo_exists():
+                    self._settings_win.lift()
+                    self._settings_win.focus_force()
+                    return
+            except Exception:
+                pass
+            self._settings_win = None
+
+        win = SettingsWindow(self.root, image_cache=self.image_cache)
+        self._settings_win = win.window
+
+        def _on_settings_close():
+            try:
+                self._settings_win.destroy()
+            except Exception:
+                pass
+            self._settings_win = None
+
+        # 覆盖关闭协议，确保引用被清理，避免悬空 Toplevel
+        self._settings_win.protocol("WM_DELETE_WINDOW", _on_settings_close)
 
     def open_download_manager(self):
         from src.ui.gui_download_manager import DownloadManagerWindow

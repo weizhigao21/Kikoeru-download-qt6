@@ -7,7 +7,6 @@ import sys
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(threadName)s: %(message)s')
 logger = logging.getLogger('gui_app')
 
 from PIL import Image, ImageTk
@@ -26,6 +25,7 @@ from src.ui.search_mixin import SearchMixin
 from src.ui.filter_mixin import FilterMixin
 from src.services.translator import get_translator
 from src import config as _config
+from src.utils import normalize_rj_id
 
 from gui_app_ui import UISetupMixin
 from gui_app_nav import NavigationMixin
@@ -49,8 +49,10 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
             img = img.resize((32, 32), Image.LANCZOS)
             icon = ImageTk.PhotoImage(img)
             self.root.iconphoto(True, icon)
-        except Exception as e:
-            print(f"设置图标失败: {e}")
+        except (OSError, ValueError) as e:
+            logger.warning("设置图标失败: %s", e, exc_info=True)
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._setup_styles()
 
@@ -105,7 +107,6 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
         self._bind_shortcuts()
         self.show_loading()
         self.root.after(100, self._on_startup_restore)
-        self.root.after(150, self.load_data_async)
 
     def _on_startup_restore(self):
         try:
@@ -113,12 +114,12 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
             if count > 0:
                 self.status_label.config(text=f"已恢复 {count} 个未完成下载任务")
         except Exception as e:
-            print(f"[启动] 恢复待处理任务异常: {e}")
+            logger.exception("启动恢复待处理任务异常: %s", e)
+        finally:
+            self.load_data_async()
 
     def _normalize_rj_id(self, rj_id):
-        if not rj_id:
-            return ""
-        return str(rj_id).replace("RJ", "").replace("rg", "").replace("RG", "").strip().zfill(6)
+        return normalize_rj_id(rj_id)
 
     def _load_downloaded_ids(self):
         try:
@@ -130,7 +131,7 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
                     self.downloaded_ids_cache.add(normalized)
             self._update_downloaded_count()
         except Exception as e:
-            print(f"[DEBUG] 加载已下载ID失败: {e}")
+            logger.exception("加载已下载ID失败: %s", e)
             self.downloaded_ids_cache = set()
 
     def _update_downloaded_count(self):
@@ -188,8 +189,29 @@ class WorkApp(DetailMixin, ListMixin, SearchMixin, FilterMixin,
         self.search_entry.select_range(0, tk.END)
         return "break"
 
+    def _on_close(self):
+        """窗口关闭：释放线程池与数据库连接后销毁主窗口。"""
+        try:
+            self._thumb_pool.shutdown(wait=False)
+            self._data_pool.shutdown(wait=False)
+        except Exception as e:
+            logger.exception("关闭线程池异常: %s", e)
+        try:
+            if hasattr(self.db, "close_all"):
+                self.db.close_all()
+            if hasattr(self.download_history, "close_all"):
+                self.download_history.close_all()
+        except Exception as e:
+            logger.exception("关闭数据库异常: %s", e)
+        finally:
+            self.root.destroy()
+
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(threadName)s: %(message)s'
+    )
     root = tk.Tk()
-    app = WorkApp(root)
+    WorkApp(root)
     root.mainloop()

@@ -1,11 +1,14 @@
 import threading
 import time
+import logging
 from collections import deque
 from typing import Callable, Optional
 
 from .models import TaskStatus, DownloadTask
 from .manager_core import DownloadCoreMixin
 from .manager_poll import DownloadPollMixin
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
@@ -77,7 +80,8 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
 
         with self._tasks_lock:
             old_task = self.tasks.get(work_id)
-            if old_task and old_task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED):
+            # 添加 CONVERTING：字幕转换期间重复提交会覆盖正在转换的任务
+            if old_task and old_task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED, TaskStatus.CONVERTING):
                 return work_id
             self.tasks[work_id] = task
 
@@ -209,6 +213,13 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
                     self._pending_db.remove_task(work_id)
                     continue
 
+                from .. import config as _config
+                current_method = _config.DOWNLOAD_METHOD
+                persisted_method = item.get("download_method", "aria2")
+                if persisted_method != current_method:
+                    logger.info("[持久化] 任务 %s 下载方式 %s → %s（跟随当前配置）",
+                                work_id, persisted_method, current_method)
+
                 task = DownloadTask(
                     work_id=work_id,
                     title=item.get("title", "未命名"),
@@ -217,7 +228,7 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
                     work=item.get("work", {}),
                     files=item.get("files", []),
                     save_dir=item.get("save_dir", ""),
-                    download_method=item.get("download_method", "aria2"),
+                    download_method=current_method,
                 )
 
                 if status_str in ("submitting", "downloading", "queued"):
@@ -235,11 +246,11 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
                 restored_count += 1
 
             if restored_count > 0:
-                print(f"[持久化] 恢复 {restored_count} 个未完成下载任务")
+                logger.info("[持久化] 恢复 %d 个未完成下载任务", restored_count)
                 self._notify_observers()
             return restored_count
-        except Exception as e:
-            print(f"[持久化] 恢复任务失败: {e}")
+        except Exception:
+            logger.exception("[持久化] 恢复任务失败")
             return 0
 
     def clear_pending_task(self, work_id: str):
@@ -263,8 +274,8 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         if self._pending_db:
             try:
                 self._pending_db.clear_all()
-            except Exception as e:
-                print(f"[持久化] 清除所有待处理任务失败: {e}")
+            except Exception:
+                logger.exception("[持久化] 清除所有待处理任务失败")
         self._notify_observers()
 
     def _cleanup_completed_tasks(self):
@@ -285,7 +296,7 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
                 del self.tasks[work_id]
 
             if tasks_to_remove:
-                print(f"[内存管理] 清理 {len(tasks_to_remove)} 个旧任务，当前任务数: {len(self.tasks)}")
+                logger.info("[内存管理] 清理 %d 个旧任务，当前任务数: %d", len(tasks_to_remove), len(self.tasks))
 
     def add_observer(self, callback: Callable):
         self._observers.append(callback)
@@ -298,5 +309,5 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         for cb in self._observers:
             try:
                 cb()
-            except Exception as e:
-                print(f"观察者通知失败: {e}")
+            except Exception:
+                logger.exception("观察者通知失败")

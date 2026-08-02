@@ -6,7 +6,9 @@ import logging
 
 from ..api_client import get_api_client
 from ..download.manager import DownloadManager
+from ..utils import normalize_rj_id
 from .tree_selector import TreeSelector
+from .fonts import DEFAULT, SMALL, TITLE
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class DownloadWindow:
 
         style = ttk.Style(self.window)
         style.map("Treeview", background=[("selected", "#0078D7")], foreground=[("selected", "white")])
-        style.configure("Download.TButton", font=("Microsoft YaHei UI", 10),
+        style.configure("Download.TButton", font=DEFAULT,
                         background="#1976D2", foreground="white")
         style.map("Download.TButton",
                   background=[("active", "#1565C0"), ("disabled", "#cccccc")],
@@ -57,7 +59,7 @@ class DownloadWindow:
         main_frame = ttk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.status_label = ttk.Label(main_frame, text="正在加载文件列表...", font=("Microsoft YaHei UI", 10))
+        self.status_label = ttk.Label(main_frame, text="正在加载文件列表...", font=DEFAULT)
         self.status_label.pack(pady=(0, 10))
 
         toolbar = ttk.Frame(main_frame)
@@ -73,7 +75,7 @@ class DownloadWindow:
                                        style="Download.TButton")
         self.download_btn.pack(side=tk.LEFT, padx=5)
 
-        self.progress_label = tk.Label(toolbar, text="", font=("Microsoft YaHei UI", 9), bg="#f0f0f0")
+        self.progress_label = tk.Label(toolbar, text="", font=SMALL, bg="#f0f0f0")
         self.progress_label.pack(side=tk.LEFT, padx=10)
 
         tree_frame = ttk.Frame(main_frame)
@@ -263,7 +265,7 @@ class DownloadWindow:
 
         source_id = self.work.get("source_id", "")
         if source_id and self.downloaded_ids_cache is not None:
-            normalized = self._normalize_rj_id(source_id)
+            normalized = normalize_rj_id(source_id)
             self.downloaded_ids_cache.add(normalized)
 
         submit_work = dict(self.work)
@@ -285,11 +287,6 @@ class DownloadWindow:
             self.window.destroy()
         except Exception:
             pass
-
-    def _normalize_rj_id(self, rj_id):
-        if not rj_id:
-            return ""
-        return str(rj_id).replace("RJ", "").replace("rg", "").replace("RG", "").strip().zfill(6)
 
     def show_error(self, msg):
         self.status_label.config(text=msg, foreground="red")

@@ -3,11 +3,13 @@ import socket
 import subprocess
 import threading
 import time
+import logging
 from xmlrpc.client import ServerProxy
 from .. import config as _config
 from ..database.cache import get_http_session
+from ..utils import strip_rj_prefix
 
-_thread_local = threading.local()
+logger = logging.getLogger(__name__)
 
 _aria2_process = None
 _aria2_lock = threading.Lock()
@@ -32,24 +34,24 @@ def ensure_aria2_running():
             return True
         aria2_exe = os.path.join(_config.ARIA2_DIR, "aria2.exe")
         if not os.path.exists(aria2_exe):
-            print(f"[Aria2] 未找到: {aria2_exe}")
+            logger.warning("[Aria2] 未找到: %s", aria2_exe)
             return False
         try:
-            print("[Aria2] 正在启动...")
+            logger.info("[Aria2] 正在启动...")
+            # 移除 shell=True：列表参数 + shell=True 语义混乱，v1.48.0 声称已修复但实际残留
             _aria2_process = subprocess.Popen(
                 [aria2_exe],
                 cwd=_config.ARIA2_DIR,
-                shell=True
             )
-            for i in range(20):
+            for _ in range(20):
                 time.sleep(0.5)
                 if check_aria2_port():
-                    print("[Aria2] 已就绪")
+                    logger.info("[Aria2] 已就绪")
                     return True
-            print("[Aria2] 启动超时")
+            logger.warning("[Aria2] 启动超时")
             return False
         except Exception as e:
-            print(f"[Aria2] 启动失败: {e}")
+            logger.exception("[Aria2] 启动失败")
             return False
 
 
@@ -58,14 +60,6 @@ class WorkDownloader:
         self.work = work
         self.download_history = download_history
         self._save_dir = None
-
-    @staticmethod
-    def _get_aria2_proxy():
-        proxy = getattr(_thread_local, 'aria2_proxy', None)
-        if proxy is None:
-            proxy = ServerProxy(_config.ARIA2_RPC_URL, allow_none=True)
-            _thread_local.aria2_proxy = proxy
-        return proxy
 
     def _get_save_dir(self):
         if self._save_dir is None:
@@ -86,9 +80,9 @@ class WorkDownloader:
 
     def download_file(self, url: str, filename: str):
         save_dir = self._get_save_dir()
-        self._download_cover_image(save_dir)
-        self._save_tags_file(save_dir)
-        s = self._get_aria2_proxy()
+        self.save_cover_image(save_dir)
+        self.save_tags(save_dir)
+        s = _get_global_aria2_proxy()
         options = {"dir": save_dir, "out": filename}
         s.aria2.addUri([url], options)
         return save_dir
@@ -98,14 +92,14 @@ class WorkDownloader:
         if subfolder:
             save_dir = os.path.join(save_dir, subfolder)
             os.makedirs(save_dir, exist_ok=True)
-        s = self._get_aria2_proxy()
+        s = _get_global_aria2_proxy()
         options = {"dir": save_dir, "out": filename}
         gid = s.aria2.addUri([url], options)
         return save_dir, gid
 
     def save_cover_image(self, save_dir: str):
-        source_id = self.work.get("source_id", "")
-        numeric_id = source_id.replace("RJ", "").replace("rg", "").replace("RG", "").lstrip("0")
+        # 使用 strip_rj_prefix 提取纯数字 ID（v1.55.0 已抽取到 utils）
+        numeric_id = strip_rj_prefix(self.work.get("source_id", "")).lstrip("0")
 
         urls_to_try = []
         if numeric_id:
@@ -117,7 +111,7 @@ class WorkDownloader:
             urls_to_try.append(main_cover_url)
 
         if not urls_to_try:
-            print(f"[DEBUG] 封面URL为空，跳过保存封面")
+            logger.debug("[封面] URL 为空，跳过保存封面")
             return False
 
         for url in urls_to_try:
@@ -128,14 +122,15 @@ class WorkDownloader:
                     cover_path = os.path.join(save_dir, "封面.jpg")
                     with open(cover_path, 'wb') as f:
                         f.write(response.content)
-                    print(f"[DEBUG] 封面已保存到: {cover_path} ({len(response.content)} 字节)")
+                    logger.debug("[封面] 已保存到: %s (%d 字节)", cover_path, len(response.content))
                     return True
                 else:
-                    print(f"[DEBUG] 封面 {url[:60]}... 无效 (状态={response.status_code}, 大小={len(response.content)})")
+                    logger.debug("[封面] %s... 无效 (状态=%s, 大小=%d)",
+                                 url[:60], response.status_code, len(response.content))
             except Exception as e:
-                print(f"[DEBUG] 封面请求失败: {url[:60]}... -> {e}")
+                logger.debug("[封面] 请求失败: %s... -> %s", url[:60], e)
 
-        print(f"[DEBUG] 所有封面URL均失败")
+        logger.debug("[封面] 所有封面 URL 均失败")
         return False
 
     def save_tags(self, save_dir: str):
@@ -148,8 +143,8 @@ class WorkDownloader:
             with open(tags_path, 'w', encoding='utf-8') as f:
                 f.write(" ".join(tags))
             return True
-        except Exception as e:
-            print(f"保存标签失败: {e}")
+        except Exception:
+            logger.exception("保存标签失败")
         return False
 
     def save_to_history(self):
@@ -174,14 +169,14 @@ class WorkDownloader:
                 thumbnail_url, main_cover_url, vas, circle_data, other_editions
             )
             return True
-        except Exception as e:
-            print(f"保存下载历史失败: {e}")
+        except Exception:
+            logger.exception("保存下载历史失败")
             return False
 
     def save_to_history_async(self):
         save_dir = self._get_save_dir()
-        self._download_cover_image(save_dir)
-        self._save_tags_file(save_dir)
+        self.save_cover_image(save_dir)
+        self.save_tags(save_dir)
         return self.save_to_history()
 
     def _extract_tags(self):
@@ -195,20 +190,16 @@ class WorkDownloader:
     def _extract_cv_names(self):
         return [va.get("name", "") for va in self.work.get("vas", []) if va.get("name")]
 
-    def _download_cover_image(self, save_dir):
-        self.save_cover_image(save_dir)
-
-    def _save_tags_file(self, save_dir):
-        self.save_tags(save_dir)
-
-
-_downloader = None
 
 _global_proxy = None
 _global_proxy_lock = threading.Lock()
 
 
 def _get_global_aria2_proxy():
+    """获取全局 aria2 XML-RPC 代理（线程安全单例）。
+
+    ServerProxy 本身是线程安全的，无需 thread-local 缓存。
+    """
     global _global_proxy
     if _global_proxy is None:
         with _global_proxy_lock:
@@ -252,7 +243,7 @@ def poll_download_progress(gids):
                 elif st == "error":
                     error_code = status.get("errorCode", "")
                     error_msg = status.get("errorMessage", "")
-                    print(f"[Aria2] 下载错误 gid={gid} code={error_code} msg={error_msg}")
+                    logger.warning("[Aria2] 下载错误 gid=%s code=%s msg=%s", gid, error_code, error_msg)
                     error_gids.append(gid)
                     has_error = True
                 elif st == "removed":
@@ -271,8 +262,8 @@ def poll_download_progress(gids):
         for gid in error_gids:
             gids.discard(gid)
         return total, completed, speed, has_error
-    except Exception as e:
-        print(f"[Aria2] 轮询异常: {e}")
+    except Exception:
+        logger.exception("[Aria2] 轮询异常")
         return 0, 0, 0, False
 
 
@@ -284,10 +275,14 @@ def purge_aria2_downloads():
     try:
         s = _get_global_aria2_proxy()
         s.aria2.purgeDownloadResult()
-        print("[Aria2] 已清除下载结果缓存")
+        logger.info("[Aria2] 已清除下载结果缓存")
         return True
-    except Exception as e:
-        print(f"[Aria2] 清除缓存失败: {e}")
+    except OSError:
+        # Aria2 未运行时连接被拒绝（如已切换到直接下载模式），清理操作可安全跳过
+        logger.debug("[Aria2] 清除缓存跳过：Aria2 未运行")
+        return False
+    except Exception:
+        logger.exception("[Aria2] 清除缓存失败")
         return False
 
 
@@ -305,8 +300,12 @@ def remove_aria2_downloads(gids):
                 s.aria2.removeDownloadResult(gid)
             except Exception:
                 pass
-        print(f"[Aria2] 已移除 {len(gids)} 个下载任务")
+        logger.info("[Aria2] 已移除 %d 个下载任务", len(gids))
         return True
-    except Exception as e:
-        print(f"[Aria2] 移除任务失败: {e}")
+    except OSError:
+        # Aria2 未运行时连接被拒绝，移除操作可安全跳过
+        logger.debug("[Aria2] 移除任务跳过：Aria2 未运行")
+        return False
+    except Exception:
+        logger.exception("[Aria2] 移除任务失败")
         return False

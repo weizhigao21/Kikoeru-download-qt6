@@ -1,39 +1,86 @@
 import os
 import threading
 import time
+import logging
 
 from .models import TaskStatus
 
+logger = logging.getLogger(__name__)
+
 
 class DownloadCoreMixin:
-    def _persist_task(self, task):
+    def _safe_persist(self, action, error_msg, *args):
+        """安全执行持久化操作，统一处理 None 检查和异常捕获。
+
+        Args:
+            action: self._pending_db 上的方法名
+            error_msg: 异常日志消息前缀
+            *args: 传给 action 的参数
+        """
         if self._pending_db is None:
             return
         try:
-            self._pending_db.save_task(task)
-        except Exception as e:
-            print(f"[持久化] 保存任务失败: {task.work_id} - {e}")
+            getattr(self._pending_db, action)(*args)
+        except Exception:
+            logger.exception("%s", error_msg)
+
+    def _persist_task(self, task):
+        self._safe_persist("save_task", f"[持久化] 保存任务失败: {task.work_id}", task)
 
     def _remove_persisted(self, work_id):
-        if self._pending_db is None:
-            return
-        try:
-            self._pending_db.remove_task(work_id)
-        except Exception as e:
-            print(f"[持久化] 删除任务失败: {work_id} - {e}")
+        self._safe_persist("remove_task", f"[持久化] 删除任务失败: {work_id}", work_id)
 
     def _sync_task_status(self, task):
-        if self._pending_db is None:
-            return
-        try:
-            self._pending_db.update_status(task.work_id, task.status)
-        except Exception as e:
-            print(f"[持久化] 更新状态失败: {task.work_id} - {e}")
+        self._safe_persist("update_status", f"[持久化] 更新状态失败: {task.work_id}", task.work_id, task.status)
 
     def _get_active_count(self):
         with self._tasks_lock:
             return sum(1 for t in self.tasks.values()
                       if t.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING))
+
+    def _check_files_existence(self, files, save_dir):
+        """检查文件列表中哪些已完整下载，返回 (待下载列表, 已跳过数量)。
+
+        _submit_aria2 和 _submit_direct 共用的文件存在性检查逻辑（v1.50.0 声称已提取但实际未做）。
+        """
+        from .downloader_direct import check_file_exists
+        files_to_download = []
+        skipped_count = 0
+
+        for file_info in files:
+            filename = file_info.get("filename", "未命名")
+            subfolder = file_info.get("subfolder", "")
+            url = file_info.get("url", "")
+            file_dir = save_dir
+            if subfolder:
+                file_dir = os.path.join(save_dir, subfolder)
+            filepath = os.path.join(file_dir, filename)
+
+            is_complete, _ = check_file_exists(filepath, url)
+            if is_complete:
+                skipped_count += 1
+                logger.info("[下载] 文件已完整，跳过: %s", filename)
+            else:
+                files_to_download.append(file_info)
+
+        if skipped_count > 0:
+            logger.info("[下载] 跳过 %d 个已完整文件，剩余 %d 个待下载", skipped_count, len(files_to_download))
+
+        return files_to_download, skipped_count
+
+    def _handle_task_completion(self, task):
+        """所有文件已存在时的任务完成处理。
+
+        _submit_aria2 和 _submit_direct 共用的完成逻辑（v1.50.0 声称已提取但实际未做）。
+        """
+        with self._tasks_lock:
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = time.time()
+            task.total_bytes = 0
+            task.completed_bytes = 0
+        self._sync_task_status(task)
+        self._on_task_completed(task)
+        self._notify_observers()
 
     def _process_queue(self):
         if self._queue_processing:
@@ -78,7 +125,6 @@ class DownloadCoreMixin:
 
     def _submit_aria2(self, work, files, task):
         from .downloader import WorkDownloader, _get_global_aria2_proxy, ensure_aria2_running
-        from .downloader_direct import check_file_exists
 
         if not ensure_aria2_running():
             with self._tasks_lock:
@@ -90,37 +136,12 @@ class DownloadCoreMixin:
         save_dir = downloader.prepare_download_dir()
         task.save_dir = save_dir
 
-        files_to_download = []
-        skipped_count = 0
-
-        for file_info in files:
-            filename = file_info.get("filename", "未命名")
-            subfolder = file_info.get("subfolder", "")
-            url = file_info.get("url", "")
-            file_dir = save_dir
-            if subfolder:
-                file_dir = os.path.join(save_dir, subfolder)
-            filepath = os.path.join(file_dir, filename)
-
-            is_complete, _ = check_file_exists(filepath, url)
-            if is_complete:
-                skipped_count += 1
-                print(f"[下载] 文件已完整，跳过: {filename}")
-            else:
-                files_to_download.append(file_info)
-
-        if skipped_count > 0:
-            print(f"[下载] 跳过 {skipped_count} 个已完整文件，剩余 {len(files_to_download)} 个待下载")
+        # 提取公共方法：文件存在性检查（v1.50.0 changelog 声称已提取但实际未做）
+        files_to_download, _ = self._check_files_existence(files, save_dir)
 
         if not files_to_download:
-            with self._tasks_lock:
-                task.status = TaskStatus.COMPLETED
-                task.completed_at = time.time()
-                task.total_bytes = 0
-                task.completed_bytes = 0
-            self._sync_task_status(task)
-            self._on_task_completed(task)
-            self._notify_observers()
+            # 提取公共方法：空文件完成处理
+            self._handle_task_completion(task)
             return
 
         gids = set()
@@ -142,10 +163,10 @@ class DownloadCoreMixin:
                     gid = s.aria2.addUri([url], options)
                     if gid:
                         gids.add(gid)
-                except Exception as e:
-                    print(f"提交下载失败: {e}")
-        except Exception as e:
-            print(f"Aria2连接失败: {e}")
+                except Exception:
+                    logger.exception("[Aria2] 提交下载失败")
+        except Exception:
+            logger.exception("[Aria2] 连接失败")
 
         with self._tasks_lock:
             task.gids = gids
@@ -161,44 +182,18 @@ class DownloadCoreMixin:
 
     def _submit_direct(self, work, files, task):
         from .downloader import WorkDownloader
-        from .downloader_direct import check_file_exists
         from .. import config as _config
 
         downloader = WorkDownloader(work, None)
         save_dir = downloader.prepare_download_dir()
         task.save_dir = save_dir
 
-        files_to_download = []
-        skipped_count = 0
-
-        for file_info in files:
-            filename = file_info.get("filename", "未命名")
-            subfolder = file_info.get("subfolder", "")
-            url = file_info.get("url", "")
-            file_dir = save_dir
-            if subfolder:
-                file_dir = os.path.join(save_dir, subfolder)
-            filepath = os.path.join(file_dir, filename)
-
-            is_complete, _ = check_file_exists(filepath, url)
-            if is_complete:
-                skipped_count += 1
-                print(f"[下载] 文件已完整，跳过: {filename}")
-            else:
-                files_to_download.append(file_info)
-
-        if skipped_count > 0:
-            print(f"[下载] 跳过 {skipped_count} 个已完整文件，剩余 {len(files_to_download)} 个待下载")
+        # 提取公共方法：文件存在性检查（v1.50.0 changelog 声称已提取但实际未做）
+        files_to_download, _ = self._check_files_existence(files, save_dir)
 
         if not files_to_download:
-            with self._tasks_lock:
-                task.status = TaskStatus.COMPLETED
-                task.completed_at = time.time()
-                task.total_bytes = 0
-                task.completed_bytes = 0
-            self._sync_task_status(task)
-            self._on_task_completed(task)
-            self._notify_observers()
+            # 提取公共方法：空文件完成处理
+            self._handle_task_completion(task)
             return
 
         max_threads = _config.DIRECT_DOWNLOAD_THREADS
@@ -275,5 +270,5 @@ class DownloadCoreMixin:
             from .downloader import WorkDownloader
             downloader = WorkDownloader(work, self.download_history)
             downloader.save_to_history_async()
-        except Exception as e:
-            print(f"后台处理失败: {e}")
+        except Exception:
+            logger.exception("后台处理失败")

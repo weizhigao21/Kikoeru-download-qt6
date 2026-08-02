@@ -8,6 +8,7 @@ import logging
 from .. import config as _config
 from ..config import _USER_ROOT, CACHE_DIR
 from ..services.translator import get_translator
+from .fonts import DEFAULT, DEFAULT_BOLD, SMALL, TINY, BODY, TITLE_BOLD
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class SettingsWindow:
 
         self.nav_buttons = {}
         for key, text in self.nav_items:
-            btn = tk.Label(left_frame, text=text, font=("Microsoft YaHei UI", 11),
+            btn = tk.Label(left_frame, text=text, font=BODY,
                           bg="#f0f0f0", fg="#333333", anchor=tk.W, padx=20, pady=12,
                           cursor="hand2")
             btn.pack(fill=tk.X)
@@ -130,43 +131,43 @@ class SettingsWindow:
         page = ttk.Frame(parent)
         self.pages["download"] = page
 
-        ttk.Label(page, text="下载设置", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(page, text="下载设置", font=TITLE_BOLD).pack(anchor=tk.W, pady=(0, 20))
 
         form_frame = ttk.Frame(page)
         form_frame.pack(fill=tk.X)
         form_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(form_frame, text="下载方式:", font=("Microsoft YaHei UI", 10)).grid(row=0, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="下载方式:", font=DEFAULT).grid(row=0, column=0, sticky=tk.W, pady=10)
         self.download_method_var = tk.StringVar(value=self.current_values["download_method"])
         method_frame = ttk.Frame(form_frame)
         method_frame.grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
         ttk.Radiobutton(method_frame, text="Aria2", variable=self.download_method_var, value="aria2").pack(side=tk.LEFT)
         ttk.Radiobutton(method_frame, text="直接下载", variable=self.download_method_var, value="direct").pack(side=tk.LEFT, padx=(20, 0))
 
-        ttk.Label(form_frame, text="Aria2 地址:", font=("Microsoft YaHei UI", 10)).grid(row=1, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="Aria2 地址:", font=DEFAULT).grid(row=1, column=0, sticky=tk.W, pady=10)
         self.aria2_var = tk.StringVar(value=self.current_values["aria2_url"])
         ttk.Entry(form_frame, textvariable=self.aria2_var, width=40).grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
 
-        ttk.Label(form_frame, text="下载线程数:", font=("Microsoft YaHei UI", 10)).grid(row=2, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="下载线程数:", font=DEFAULT).grid(row=2, column=0, sticky=tk.W, pady=10)
         self.direct_threads_var = tk.StringVar(value=str(self.current_values["direct_threads"]))
         threads_frame = ttk.Frame(form_frame)
         threads_frame.grid(row=2, column=1, sticky=tk.W, padx=(20, 0))
         ttk.Spinbox(threads_frame, from_=1, to=10, textvariable=self.direct_threads_var, width=8).pack(side=tk.LEFT)
-        ttk.Label(threads_frame, text="(直接下载并发数)", font=("Microsoft YaHei UI", 9), foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(threads_frame, text="(直接下载并发数)", font=SMALL, foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
 
-        ttk.Label(form_frame, text="下载目录:", font=("Microsoft YaHei UI", 10)).grid(row=3, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="下载目录:", font=DEFAULT).grid(row=3, column=0, sticky=tk.W, pady=10)
         dir_frame = ttk.Frame(form_frame)
         dir_frame.grid(row=3, column=1, sticky=tk.W, padx=(20, 0))
         self.download_dir_var = tk.StringVar(value=self.current_values["download_dir"])
         ttk.Entry(dir_frame, textvariable=self.download_dir_var, width=35).pack(side=tk.LEFT)
         ttk.Button(dir_frame, text="浏览", command=self.browse_dir).pack(side=tk.LEFT, padx=(10, 0))
 
-        ttk.Label(form_frame, text="文件名过滤字符:", font=("Microsoft YaHei UI", 10)).grid(row=4, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="文件名过滤字符:", font=DEFAULT).grid(row=4, column=0, sticky=tk.W, pady=10)
         filter_frame = ttk.Frame(form_frame)
         filter_frame.grid(row=4, column=1, sticky=tk.W, padx=(20, 0))
         self.filename_filter_var = tk.StringVar(value=self.current_values["filename_filter_chars"])
         ttk.Entry(filter_frame, textvariable=self.filename_filter_var, width=25).pack(side=tk.LEFT)
-        ttk.Label(filter_frame, text="(额外过滤的字符，如 【】「」《》…)", font=("Microsoft YaHei UI", 9), foreground="gray").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(filter_frame, text="(额外过滤的字符，如 【】「」《》…)", font=SMALL, foreground="gray").pack(side=tk.LEFT, padx=(8, 0))
 
         self.auto_flatten_var = tk.BooleanVar(value=self.current_values["auto_flatten_enabled"])
         ttk.Checkbutton(form_frame, text="默认启用自动整理文件夹（下载完成后扁平化嵌套目录）", variable=self.auto_flatten_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=10)
@@ -178,10 +179,10 @@ class SettingsWindow:
         page = ttk.Frame(parent)
         self.pages["queue"] = page
 
-        ttk.Label(page, text="队列设置", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(page, text="队列设置", font=TITLE_BOLD).pack(anchor=tk.W, pady=(0, 20))
 
         desc = ttk.Label(page, text="启用队列模式后，作品将按顺序下载，一个完成后再开始下一个。\n适合网络受限或需要避免触发限流的场景。",
-                        font=("Microsoft YaHei UI", 9), foreground="gray", wraplength=400)
+                        font=SMALL, foreground="gray", wraplength=400)
         desc.pack(anchor=tk.W, pady=(0, 20))
 
         form_frame = ttk.Frame(page)
@@ -191,32 +192,32 @@ class SettingsWindow:
         self.queue_mode_var = tk.BooleanVar(value=self.current_values["queue_mode"])
         ttk.Checkbutton(form_frame, text="启用队列模式", variable=self.queue_mode_var).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=10)
 
-        ttk.Label(form_frame, text="最大同时下载:", font=("Microsoft YaHei UI", 10)).grid(row=1, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="最大同时下载:", font=DEFAULT).grid(row=1, column=0, sticky=tk.W, pady=10)
         concurrent_frame = ttk.Frame(form_frame)
         concurrent_frame.grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
         self.max_concurrent_var = tk.StringVar(value=str(self.current_values["max_concurrent"]))
         ttk.Spinbox(concurrent_frame, from_=1, to=5, textvariable=self.max_concurrent_var, width=8).pack(side=tk.LEFT)
-        ttk.Label(concurrent_frame, text="(队列模式下同时下载的作品数)", font=("Microsoft YaHei UI", 9), foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(concurrent_frame, text="(队列模式下同时下载的作品数)", font=SMALL, foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
 
     def _create_storage_page(self, parent):
         page = ttk.Frame(parent)
         self.pages["storage"] = page
 
-        ttk.Label(page, text="存储管理", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(page, text="存储管理", font=TITLE_BOLD).pack(anchor=tk.W, pady=(0, 20))
 
         form_frame = ttk.Frame(page)
         form_frame.pack(fill=tk.X)
         form_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(form_frame, text="数据库目录:", font=("Microsoft YaHei UI", 10)).grid(row=0, column=0, sticky=tk.W, pady=10)
+        ttk.Label(form_frame, text="数据库目录:", font=DEFAULT).grid(row=0, column=0, sticky=tk.W, pady=10)
         db_frame = ttk.Frame(form_frame)
         db_frame.grid(row=0, column=1, sticky=tk.W, padx=(20, 0))
         self.db_dir_var = tk.StringVar(value=self.current_values["db_dir"])
         ttk.Entry(db_frame, textvariable=self.db_dir_var, width=35).pack(side=tk.LEFT)
         ttk.Button(db_frame, text="浏览", command=self.browse_db_dir).pack(side=tk.LEFT, padx=(10, 0))
 
-        ttk.Label(form_frame, text="", font=("Microsoft YaHei UI", 8)).grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
-        ttk.Label(form_frame, text="留空使用默认位置 (settings/)", font=("Microsoft YaHei UI", 9),
+        ttk.Label(form_frame, text="", font=TINY).grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
+        ttk.Label(form_frame, text="留空使用默认位置 (settings/)", font=SMALL,
                  foreground="gray").grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
 
         ttk.Separator(page, orient="horizontal").pack(fill=tk.X, pady=20)
@@ -225,21 +226,21 @@ class SettingsWindow:
         cache_frame.pack(fill=tk.X)
 
         cache_size = self._get_cache_size()
-        self.cache_label = ttk.Label(cache_frame, text=f"图片缓存大小: {cache_size}", font=("Microsoft YaHei UI", 10))
+        self.cache_label = ttk.Label(cache_frame, text=f"图片缓存大小: {cache_size}", font=DEFAULT)
         self.cache_label.pack(side=tk.LEFT)
         ttk.Button(cache_frame, text="清除缓存", command=self.clear_cache).pack(side=tk.RIGHT)
 
         ttk.Label(page, text="清除缓存将删除所有已下载的图片，程序会重新从网络加载。",
-                 font=("Microsoft YaHei UI", 9), foreground="gray").pack(anchor=tk.W, pady=(10, 0))
+                 font=SMALL, foreground="gray").pack(anchor=tk.W, pady=(10, 0))
 
     def _create_subtitle_page(self, parent):
         page = ttk.Frame(parent)
         self.pages["subtitle"] = page
 
-        ttk.Label(page, text="字幕管理", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(page, text="字幕管理", font=TITLE_BOLD).pack(anchor=tk.W, pady=(0, 20))
 
         desc = ttk.Label(page, text="启用字幕转换后，下载的 VTT 字幕文件将自动转换为 LRC 格式。\n转换后的字幕文件名会移除音频格式后缀（如 .mp3.vtt → .lrc）。",
-                        font=("Microsoft YaHei UI", 9), foreground="gray", wraplength=400)
+                        font=SMALL, foreground="gray", wraplength=400)
         desc.pack(anchor=tk.W, pady=(0, 20))
 
         form_frame = ttk.Frame(page)
@@ -249,9 +250,9 @@ class SettingsWindow:
         self.subtitle_convert_var = tk.BooleanVar(value=self.current_values["subtitle_convert_enabled"])
         ttk.Checkbutton(form_frame, text="启用 VTT 字幕自动转换为 LRC", variable=self.subtitle_convert_var).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=10)
 
-        ttk.Label(form_frame, text="转换说明:", font=("Microsoft YaHei UI", 10, "bold")).grid(row=1, column=0, sticky=tk.W, pady=(20, 5))
+        ttk.Label(form_frame, text="转换说明:", font=DEFAULT_BOLD).grid(row=1, column=0, sticky=tk.W, pady=(20, 5))
         info_text = "• VTT (Web Video Text Tracks) 是一种网页字幕格式\n• LRC (Lyric) 是一种歌词文件格式，支持时间戳\n• 转换后字幕文件名会简化，便于管理\n• 原始 VTT 文件会在转换后自动删除"
-        ttk.Label(form_frame, text=info_text, font=("Microsoft YaHei UI", 9), foreground="gray", justify=tk.LEFT).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
+        ttk.Label(form_frame, text=info_text, font=SMALL, foreground="gray", justify=tk.LEFT).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(20, 0))
 
     def _create_ai_page(self, parent):
         # AI 设置内容较多，使用可滚动容器避免超出窗口高度
@@ -273,10 +274,10 @@ class SettingsWindow:
         self._bind_mousewheel(canvas)
         self._bind_mousewheel(page)
 
-        ttk.Label(page, text="AI 翻译设置", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 20))
+        ttk.Label(page, text="AI 翻译设置", font=TITLE_BOLD).pack(anchor=tk.W, pady=(0, 20))
 
         desc = ttk.Label(page, text="启用 AI 翻译后，可以使用 OpenAI 兼容的 API 翻译作品标题。\n支持 DeepSeek、GPT 等模型。",
-                        font=("Microsoft YaHei UI", 9), foreground="gray", wraplength=400)
+                        font=SMALL, foreground="gray", wraplength=400)
         desc.pack(anchor=tk.W, pady=(0, 20))
 
         form_frame = ttk.Frame(page)
@@ -286,20 +287,20 @@ class SettingsWindow:
         self.ai_enabled_var = tk.BooleanVar(value=self.current_values["ai_enabled"])
         ttk.Checkbutton(form_frame, text="启用 AI 翻译", variable=self.ai_enabled_var).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=10)
 
-        ttk.Label(form_frame, text="API Key:", font=("Microsoft YaHei UI", 10)).grid(row=1, column=0, sticky=tk.W, pady=8)
+        ttk.Label(form_frame, text="API Key:", font=DEFAULT).grid(row=1, column=0, sticky=tk.W, pady=8)
         self.ai_key_var = tk.StringVar(value=self.current_values["ai_key"])
         ttk.Entry(form_frame, textvariable=self.ai_key_var, width=40, show="*").grid(row=1, column=1, sticky=tk.W, padx=(20, 0))
 
-        ttk.Label(form_frame, text="API 地址:", font=("Microsoft YaHei UI", 10)).grid(row=2, column=0, sticky=tk.W, pady=8)
+        ttk.Label(form_frame, text="API 地址:", font=DEFAULT).grid(row=2, column=0, sticky=tk.W, pady=8)
         self.ai_base_var = tk.StringVar(value=self.current_values["ai_base"])
         ttk.Entry(form_frame, textvariable=self.ai_base_var, width=40).grid(row=2, column=1, sticky=tk.W, padx=(20, 0))
 
-        ttk.Label(form_frame, text="模型名称:", font=("Microsoft YaHei UI", 10)).grid(row=3, column=0, sticky=tk.W, pady=8)
+        ttk.Label(form_frame, text="模型名称:", font=DEFAULT).grid(row=3, column=0, sticky=tk.W, pady=8)
         self.ai_model_var = tk.StringVar(value=self.current_values["ai_model"])
         model_frame = ttk.Frame(form_frame)
         model_frame.grid(row=3, column=1, sticky=tk.W, padx=(20, 0))
         ttk.Entry(model_frame, textvariable=self.ai_model_var, width=25).pack(side=tk.LEFT)
-        ttk.Label(model_frame, text="(如 deepseek-chat, gpt-3.5-turbo)", font=("Microsoft YaHei UI", 9),
+        ttk.Label(model_frame, text="(如 deepseek-chat, gpt-3.5-turbo)", font=SMALL,
                  foreground="gray").pack(side=tk.LEFT, padx=(10, 0))
 
         self.ai_thinking_var = tk.BooleanVar(value=self.current_values["ai_thinking_enabled"])
@@ -392,7 +393,6 @@ class SettingsWindow:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4, ensure_ascii=False)
                 f.flush()
-                os.fsync(f.fileno())
         except PermissionError:
             messagebox.showerror("错误", "没有权限写入配置文件", parent=self.window)
             return
@@ -438,7 +438,7 @@ class SettingsWindow:
                         try:
                             shutil.copy2(src, dst)
                         except Exception as e:
-                            logger.exception("复制 %s 失败: %s", db_name, e)
+                            logger.exception("复制 %s 失败", db_name)
 
         _config.DB_DIR = new_db_dir if os.path.isabs(new_db_dir) and new_db_dir else os.path.join(_USER_ROOT, new_db_dir) if new_db_dir else os.path.join(_USER_ROOT, "settings")
         _config.DB_PATH = os.path.join(_config.DB_DIR, "works.db")

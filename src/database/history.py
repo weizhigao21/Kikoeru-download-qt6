@@ -1,72 +1,14 @@
 import sqlite3
 import json
-import threading
-import time
-from contextlib import contextmanager
+import logging
 
-_CONNECTION_TIMEOUT = 300
+from .base import BaseDatabaseManager
+from ..utils import normalize_rj_id
+
+logger = logging.getLogger(__name__)
 
 
-class DownloadHistoryManager:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self._local = threading.local()
-        self._lock = threading.Lock()
-        self._init_db()
-
-    @contextmanager
-    def _connect(self):
-        conn = getattr(self._local, 'conn', None)
-        last_used = getattr(self._local, 'last_used', 0)
-
-        if conn is None or (time.time() - last_used > _CONNECTION_TIMEOUT):
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-4096")
-            self._local.conn = conn
-
-        self._local.last_used = time.time()
-
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            try:
-                conn.close()
-            except Exception:
-                pass
-            self._local.conn = None
-            raise
-
-    def close_all(self):
-        with self._lock:
-            conn = getattr(self._local, 'conn', None)
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                self._local.conn = None
-
-    @staticmethod
-    def _safe_json_load(s, default=None):
-        if not s:
-            return default if default is not None else ([] if default == [] else {})
-        try:
-            data = json.loads(s)
-            return data if isinstance(data, (list, dict)) else (default or [])
-        except (json.JSONDecodeError, TypeError):
-            return default if default is not None else []
+class DownloadHistoryManager(BaseDatabaseManager):
 
     def _init_db(self):
         with self._connect() as conn:
@@ -111,26 +53,41 @@ class DownloadHistoryManager:
             """)
             conn.commit()
 
+    @staticmethod
+    def _parse_tags(tags_str):
+        """解析 tags 字段，兼容 JSON 数组和旧版逗号分隔格式。
+
+        旧格式：tag1,tag2,tag3（逗号分隔）
+        新格式：["tag1","tag2","tag3"]（JSON 数组）
+        """
+        if not tags_str:
+            return []
+        # 优先尝试 JSON 解析
+        if tags_str.strip().startswith("["):
+            parsed = DownloadHistoryManager._safe_json_load(tags_str, [])
+            if isinstance(parsed, list):
+                return parsed
+        # 回退到旧版逗号分隔格式
+        return [t for t in tags_str.split(",") if t]
+
     def add_download(self, rj_id: str, title: str, tags: list, cv_names: list, circle_name: str,
                      thumbnail_url: str = "", main_cover_url: str = "", vas: list = None,
                      circle_data: dict = None, other_editions: list = None):
         normalized_rj_id = f"RJ{self._normalize_rj_id(rj_id)}"
         with self._connect() as conn:
             cursor = conn.cursor()
-            tags_str = ",".join(tags) if tags else ""
+            # tags 改用 JSON 序列化，避免标签名含逗号时被错误分割
+            tags_str = json.dumps(tags, ensure_ascii=False) if tags else ""
             cv_names_str = ",".join(cv_names) if cv_names else ""
             vas_str = json.dumps(vas, ensure_ascii=False) if vas else ""
             circle_str = json.dumps(circle_data, ensure_ascii=False) if circle_data else ""
             other_editions_str = json.dumps(other_editions, ensure_ascii=False) if other_editions else ""
-            try:
-                cursor.execute("""
-                    INSERT OR REPLACE INTO download_history
-                    (rj_id, title, tags, cv_names, circle_name, thumbnail_url, main_cover_url, vas, circle_data, other_editions)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (normalized_rj_id, title, tags_str, cv_names_str, circle_name, thumbnail_url, main_cover_url, vas_str, circle_str, other_editions_str))
-                conn.commit()
-            except Exception as e:
-                print(f"添加下载历史失败: {e}")
+            # 让异常传播：_connect 的 contextmanager 会自动 rollback
+            cursor.execute("""
+                INSERT OR REPLACE INTO download_history
+                (rj_id, title, tags, cv_names, circle_name, thumbnail_url, main_cover_url, vas, circle_data, other_editions)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (normalized_rj_id, title, tags_str, cv_names_str, circle_name, thumbnail_url, main_cover_url, vas_str, circle_str, other_editions_str))
 
     def get_download_history(self) -> list:
         with self._connect() as conn:
@@ -165,13 +122,15 @@ class DownloadHistoryManager:
 
             works = []
             for row in rows:
+                # _parse_tags 兼容 JSON 数组和旧版逗号分隔格式
+                tags_list = self._parse_tags(row[2])
                 work = {
                     "id": row[0] or "",
                     "title": row[1] or "",
                     "source_id": row[0] or "",
                     "thumbnailCoverUrl": row[3] or "",
                     "mainCoverUrl": row[4] or "",
-                    "tags": [{"i18n": {"zh-cn": {"name": tag}}} for tag in (row[2] or "").split(",") if tag],
+                    "tags": [{"i18n": {"zh-cn": {"name": tag}}} for tag in tags_list],
                     "vas": self._safe_json_load(row[5], []),
                     "circle": self._safe_json_load(row[6], {}),
                     "other_language_editions_in_db": self._safe_json_load(row[7], [])
@@ -209,7 +168,8 @@ class DownloadHistoryManager:
                 params.append(main_cover_url)
             if tags is not None:
                 updates.append("tags = ?")
-                params.append(",".join(tags) if tags else "")
+                # tags 改用 JSON 序列化保持一致
+                params.append(json.dumps(tags, ensure_ascii=False) if tags else "")
             if vas is not None:
                 updates.append("vas = ?")
                 params.append(json.dumps(vas, ensure_ascii=False) if vas else "")
@@ -226,9 +186,7 @@ class DownloadHistoryManager:
                 conn.commit()
 
     def _normalize_rj_id(self, rj_id):
-        if not rj_id:
-            return ""
-        return str(rj_id).replace("RJ", "").replace("rg", "").replace("RG", "").strip().zfill(6)
+        return normalize_rj_id(rj_id)
 
     def is_downloaded(self, rj_id: str) -> bool:
         normalized = self._normalize_rj_id(rj_id)

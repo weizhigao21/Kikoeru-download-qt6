@@ -1,8 +1,18 @@
 import tkinter as tk
 from tkinter import ttk
 
+from ..download.models import TaskStatus
+from .fonts import DEFAULT, SMALL, TINY, TITLE, TITLE_BOLD, MONO_ID, MONO_NUM
+
 
 class DownloadManagerWindow:
+    # status_map 常量：_build_active_row 和 _update_progress 两处重复提取（v1.55.0 风格）
+    _STATUS_MAP = {
+        (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING): ("\u25cf 下载中", "primary"),
+        (TaskStatus.QUEUED,): ("\u25cb 等待下载", "accent"),
+        (TaskStatus.FAILED,): ("\u2717 失败", "error"),
+    }
+
     def __init__(self, parent, dl_manager):
         self.parent = parent
         self.dl_manager = dl_manager
@@ -53,27 +63,27 @@ class DownloadManagerWindow:
         main = tk.Frame(self.window, bg=c["bg"])
         main.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
 
-        tk.Label(main, text="下载任务管理", font=("Microsoft YaHei UI", 14, "bold"),
+        tk.Label(main, text="下载任务管理", font=TITLE_BOLD,
                  bg=c["bg"], fg=c["text"]).pack(anchor=tk.W)
 
         btn_bar = tk.Frame(main, bg=c["bg"])
         btn_bar.pack(fill=tk.X, pady=(12, 8))
 
-        self.btn_active = tk.Button(btn_bar, text=" 正在下载 ", font=("Microsoft YaHei UI", 10),
+        self.btn_active = tk.Button(btn_bar, text=" 正在下载 ", font=DEFAULT,
                                      bg="#E8F0FE", fg=c["primary"], activebackground="#D2E3FC",
                                      activeforeground=c["primary"],
                                      relief=tk.FLAT, bd=0, cursor="hand2",
                                      command=lambda: self._switch_tab("active"))
         self.btn_active.pack(side=tk.LEFT)
 
-        self.btn_done = tk.Button(btn_bar, text=" 已完成 ", font=("Microsoft YaHei UI", 10),
+        self.btn_done = tk.Button(btn_bar, text=" 已完成 ", font=DEFAULT,
                                    bg=c["bg"], fg=c["text_secondary"],
                                    activebackground=c["bg"], activeforeground=c["primary"],
                                    relief=tk.FLAT, bd=0, cursor="hand2",
                                    command=lambda: self._switch_tab("done"))
         self.btn_done.pack(side=tk.LEFT, padx=(4, 0))
 
-        self.count_label = tk.Label(btn_bar, text="", font=("Microsoft YaHei UI", 9),
+        self.count_label = tk.Label(btn_bar, text="", font=SMALL,
                                      bg=c["bg"], fg=c["text_hint"])
         self.count_label.pack(side=tk.RIGHT)
 
@@ -128,35 +138,34 @@ class DownloadManagerWindow:
         self._last_done_ids = None
         self._refresh()
 
+    def _get_status_text_color(self, task):
+        """从 _STATUS_MAP 获取状态文本和颜色（_build_active_row 和 _update_progress 共用）"""
+        status_text = task.status.value if hasattr(task.status, 'value') else str(task.status)
+        color_key = "text_hint"
+        for keys, (text, key) in self._STATUS_MAP.items():
+            if task.status in keys:
+                status_text, color_key = text, key
+                break
+        return status_text, self.colors.get(color_key, self.colors["text_hint"])
+
     def _build_active_row(self, task):
         c = self.colors
         row = tk.Frame(self.active_inner, bg=c["card_bg"])
         row.pack(fill=tk.X, pady=1, padx=4, ipady=4)
 
-        sv = task.status.value if hasattr(task.status, 'value') else str(task.status)
-        status_map = {
-            ("submitting", "downloading"): ("\u25cf 下载中", c["primary"]),
-            ("queued",): ("\u25cb 等待下载", c["accent"]),
-            ("failed",): ("\u2717 失败", c["error"]),
-        }
-        status_text = sv
-        status_color = c["text_hint"]
-        for keys, val in status_map.items():
-            if sv in keys:
-                status_text, status_color = val
-                break
+        status_text, status_color = self._get_status_text_color(task)
 
-        status_lbl = tk.Label(row, text=status_text, font=("Microsoft YaHei UI", 9),
+        status_lbl = tk.Label(row, text=status_text, font=SMALL,
                               bg=c["card_bg"], fg=status_color, width=10, anchor=tk.W)
         status_lbl.pack(side=tk.LEFT, padx=(8, 4))
 
         id_text = task.work_id[:11] if len(task.work_id) > 11 else task.work_id
-        id_lbl = tk.Label(row, text=id_text, font=("Consolas", 9, "bold"),
+        id_lbl = tk.Label(row, text=id_text, font=MONO_ID,
                           bg=c["card_bg"], fg=c["primary"], width=12, anchor=tk.W)
         id_lbl.pack(side=tk.LEFT, padx=(0, 4))
 
         title_text = task.title[:35] if len(task.title) > 35 else task.title
-        title_lbl = tk.Label(row, text=title_text, font=("Microsoft YaHei UI", 9),
+        title_lbl = tk.Label(row, text=title_text, font=SMALL,
                              bg=c["card_bg"], fg=c["text"], width=35, anchor=tk.W)
         title_lbl.pack(side=tk.LEFT, padx=(0, 4))
 
@@ -164,22 +173,22 @@ class DownloadManagerWindow:
         pbar.pack(side=tk.LEFT, padx=(0, 2))
 
         pct_var = tk.StringVar(value="...")
-        pct_lbl = tk.Label(row, textvariable=pct_var, font=("Consolas", 9),
+        pct_lbl = tk.Label(row, textvariable=pct_var, font=MONO_NUM,
                             bg=c["card_bg"], fg=c["text"], width=5, anchor=tk.E)
         pct_lbl.pack(side=tk.LEFT, padx=(0, 4))
 
         speed_var = tk.StringVar(value="")
-        speed_lbl = tk.Label(row, textvariable=speed_var, font=("Microsoft YaHei UI", 8),
+        speed_lbl = tk.Label(row, textvariable=speed_var, font=TINY,
                              bg=c["card_bg"], fg=c["text_hint"], width=10, anchor=tk.W)
         speed_lbl.pack(side=tk.LEFT, padx=(0, 8))
 
         btn_widget = None
-        if sv == "failed":
+        if task.status == TaskStatus.FAILED:
             def _retry(wid=task.work_id):
                 self.dl_manager.retry(wid)
             btn_widget = ttk.Button(row, text="重试", width=5, command=_retry)
             btn_widget.pack(side=tk.RIGHT, padx=(0, 8))
-        elif sv in ("submitting", "downloading", "queued"):
+        elif task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED):
             def _cancel(wid=task.work_id):
                 self.dl_manager.cancel(wid)
             btn_widget = ttk.Button(row, text="取消", width=5, command=_cancel)
@@ -196,16 +205,16 @@ class DownloadManagerWindow:
         row.pack(fill=tk.X, pady=1, padx=4, ipady=3)
 
         id_text = task.work_id[:12] if len(task.work_id) > 12 else task.work_id
-        id_lbl = tk.Label(row, text=id_text, font=("Consolas", 9, "bold"),
+        id_lbl = tk.Label(row, text=id_text, font=MONO_ID,
                           bg=c["card_bg"], fg=c["success"], width=13, anchor=tk.W)
         id_lbl.pack(side=tk.LEFT, padx=(10, 6))
 
         title_text = task.title[:50] if len(task.title) > 50 else task.title
-        title_lbl = tk.Label(row, text=title_text, font=("Microsoft YaHei UI", 9),
+        title_lbl = tk.Label(row, text=title_text, font=SMALL,
                              bg=c["card_bg"], fg=c["text"], anchor=tk.W)
         title_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
-        check_lbl = tk.Label(row, text="\u2713", font=("Microsoft YaHei UI", 14),
+        check_lbl = tk.Label(row, text="\u2713", font=TITLE,
                              bg=c["card_bg"], fg=c["success"])
         check_lbl.pack(side=tk.RIGHT, padx=(0, 10))
         return {"row": row}
@@ -224,10 +233,10 @@ class DownloadManagerWindow:
         active_tasks = []
         done_tasks = []
         for t in tasks:
-            sv = t.status.value if hasattr(t.status, 'value') else str(t.status)
-            if sv == "completed":
+            # 用 TaskStatus 枚举比较替代字符串比较（v1.55.0 风格）
+            if t.status == TaskStatus.COMPLETED:
                 done_tasks.append(t)
-            elif sv != "cancelled":
+            elif t.status != TaskStatus.CANCELLED:
                 active_tasks.append(t)
 
         self.count_label.config(text=f"正在下载: {len(active_tasks)}  |  已完成: {len(done_tasks)}")
@@ -270,7 +279,7 @@ class DownloadManagerWindow:
         if not active_tasks:
             self._empty_active_label = tk.Label(
                 self.active_inner, text="暂无进行中的下载任务",
-                font=("Microsoft YaHei UI", 10), bg=self.colors["card_bg"],
+                font=DEFAULT, bg=self.colors["card_bg"],
                 fg=self.colors["text_hint"])
             self._empty_active_label.pack(pady=40)
         else:
@@ -295,7 +304,7 @@ class DownloadManagerWindow:
         if not done_tasks:
             self._empty_done_label = tk.Label(
                 self.done_inner, text="暂无已完成记录",
-                font=("Microsoft YaHei UI", 10), bg=self.colors["card_bg"],
+                font=DEFAULT, bg=self.colors["card_bg"],
                 fg=self.colors["text_hint"])
             self._empty_done_label.pack(pady=40)
         else:

@@ -3,6 +3,8 @@ from tkinter import messagebox
 import threading
 import logging
 
+from src.config import SHOW_ALL, HIDE_DOWNLOADED, DOWNLOADED_TAB
+
 logger = logging.getLogger('gui_app')
 
 
@@ -27,7 +29,7 @@ class NavigationMixin:
         self._bump_generation()
 
         if new_tab == "downloaded":
-            self.show_downloaded = 3
+            self.show_downloaded = DOWNLOADED_TAB
             self.sort_label.pack(side=tk.LEFT, padx=(10, 5))
             self.sort_combo.pack(side=tk.LEFT, padx=5)
             self.hide_dl_btn.pack_forget()
@@ -35,6 +37,7 @@ class NavigationMixin:
             if self.current_tags or self.circle_query or self.keyword_query:
                 self.current_page = 1
                 self.page_var.set("1")
+                self.loading = True
                 self._search_in_downloaded_works()
             elif self._all_downloaded_works and self._downloaded_cache_valid:
                 self.data_loaded = True
@@ -48,10 +51,10 @@ class NavigationMixin:
             self.sort_combo.pack_forget()
             self.hide_dl_btn.pack(side=tk.LEFT, padx=(10, 5))
             if self._hide_downloaded:
-                self.show_downloaded = 2
+                self.show_downloaded = HIDE_DOWNLOADED
                 self.hide_dl_btn.config(text="隐藏下载")
             else:
-                self.show_downloaded = 1
+                self.show_downloaded = SHOW_ALL
                 self.hide_dl_btn.config(text="显示全部")
 
             if self.current_tags:
@@ -71,9 +74,6 @@ class NavigationMixin:
             else:
                 self.load_data_async()
 
-    def switch_tab(self, tab_name):
-        pass
-
     def load_data_async(self):
         self.loading = True
         self._bump_generation()
@@ -87,10 +87,14 @@ class NavigationMixin:
             threading.Thread(target=self._load_downloaded_works, args=(sort_key,), daemon=True).start()
             return
 
+        # 捕获快照避免闭包执行期间实例属性被主线程修改导致状态不一致
+        tab_snapshot = self.current_tab
+        page_snapshot = self.current_page
+
         def load():
-            logger.debug("load() 后台线程启动 tab=%s page=%s", self.current_tab, self.current_page)
-            if self.current_tab == "recommend":
-                cached_works = self.db.get_works_by_page(self.current_page)
+            logger.debug("load() 后台线程启动 tab=%s page=%s", tab_snapshot, page_snapshot)
+            if tab_snapshot == "recommend":
+                cached_works = self.db.get_works_by_page(page_snapshot)
                 logger.debug("load() DB查询: %s 条", len(cached_works) if cached_works else 0)
                 if cached_works:
                     if self._nav_generation != gen:
@@ -134,7 +138,7 @@ class NavigationMixin:
             logger.debug("_fetch_from_api 提交 _on_data_loaded(False)")
             self.root.after(0, self._on_data_loaded, False)
         except Exception as e:
-            logger.debug("_fetch_from_api 异常: %s", e)
+            logger.exception("_fetch_from_api 异常: %s", e)
             if self._nav_generation != gen:
                 self.root.after(0, self._safe_reset_loading)
                 return
@@ -155,6 +159,7 @@ class NavigationMixin:
             self.data_loaded = True
             self.root.after(0, self._on_data_loaded, False)
         except Exception as e:
+            logger.exception("_fetch_latest_from_api 异常: %s", e)
             if self._nav_generation != gen:
                 self.root.after(0, self._safe_reset_loading)
                 return
@@ -168,7 +173,7 @@ class NavigationMixin:
 
         if self.works:
             logger.debug("_on_data_loaded >> 批量UI更新")
-            if self.show_downloaded == 2:
+            if self.show_downloaded == HIDE_DOWNLOADED:
                 self._apply_filter()
             else:
                 self._batch_ui_update()
@@ -176,7 +181,7 @@ class NavigationMixin:
         else:
             self.display_empty_state()
             self.update_buttons()
-            messagebox.showinfo("提示", "当前页没有数据")
+            self.status_label.config(text="当前页没有数据")
 
     def _batch_ui_update(self):
         self.hide_loading()
@@ -208,10 +213,10 @@ class NavigationMixin:
             return
         self._hide_downloaded = not self._hide_downloaded
         if self._hide_downloaded:
-            self.show_downloaded = 2
+            self.show_downloaded = HIDE_DOWNLOADED
             self.hide_dl_btn.config(text="隐藏下载")
         else:
-            self.show_downloaded = 1
+            self.show_downloaded = SHOW_ALL
             self.hide_dl_btn.config(text="显示全部")
         self.current_page = 1
         self.page_var.set("1")
@@ -226,6 +231,28 @@ class NavigationMixin:
         self.clear_search_history()
         self.load_data_async()
 
+    def _navigate_search(self, page: int):
+        """翻页时根据当前搜索条件触发对应加载路径（标签/厂商/关键词/无搜索）。
+
+        消除 go_to_page/prev_page/next_page 中重复的搜索分支代码。
+        """
+        if self.current_tags:
+            self.search_by_tag(page)
+        elif self.circle_query:
+            self._bump_generation()
+            gen = self._nav_generation
+            self.loading = True
+            self.show_loading()
+            threading.Thread(target=self._search_by_circle_async, args=(page, gen), daemon=True).start()
+        elif self.keyword_query:
+            self._bump_generation()
+            gen = self._nav_generation
+            self.loading = True
+            self.show_loading()
+            threading.Thread(target=self._search_by_keyword_async, args=(page, gen), daemon=True).start()
+        else:
+            self.load_data_async()
+
     def go_to_page(self):
         if self.loading:
             return
@@ -236,7 +263,7 @@ class NavigationMixin:
             page = int(self.page_var.get())
             if page < 1:
                 page = 1
-            if self.show_downloaded == 3:
+            if self.show_downloaded == DOWNLOADED_TAB:
                 if self.current_tags or self.keyword_query or self.circle_query:
                     self._downloaded_page = page
                     self.page_var.set(str(page))
@@ -252,22 +279,7 @@ class NavigationMixin:
                 return
             self.current_page = page
             self.page_var.set(str(page))
-            if self.current_tags:
-                self.search_by_tag(self.current_page)
-            elif self.circle_query:
-                self._bump_generation()
-                gen = self._nav_generation
-                self.loading = True
-                self.show_loading()
-                threading.Thread(target=self._search_by_circle_async, args=(self.current_page, gen), daemon=True).start()
-            elif self.keyword_query:
-                self._bump_generation()
-                gen = self._nav_generation
-                self.loading = True
-                self.show_loading()
-                threading.Thread(target=self._search_by_keyword_async, args=(self.current_page, gen), daemon=True).start()
-            else:
-                self.load_data_async()
+            self._navigate_search(self.current_page)
         except ValueError:
             messagebox.showerror("错误", "请输入有效的页码")
 
@@ -277,7 +289,7 @@ class NavigationMixin:
     def prev_page(self):
         if self.loading:
             return
-        if self.show_downloaded == 3:
+        if self.show_downloaded == DOWNLOADED_TAB:
             if not self._all_downloaded_works or self._downloaded_page <= 1:
                 return
             if self._nav_debounce_id:
@@ -297,27 +309,12 @@ class NavigationMixin:
         self._nav_debounce_id = self.root.after(300, self._clear_nav_debounce)
         self.current_page -= 1
         self.page_var.set(str(self.current_page))
-        if self.current_tags:
-            self.search_by_tag(self.current_page)
-        elif self.circle_query:
-            self._bump_generation()
-            gen = self._nav_generation
-            self.loading = True
-            self.show_loading()
-            threading.Thread(target=self._search_by_circle_async, args=(self.current_page, gen), daemon=True).start()
-        elif self.keyword_query:
-            self._bump_generation()
-            gen = self._nav_generation
-            self.loading = True
-            self.show_loading()
-            threading.Thread(target=self._search_by_keyword_async, args=(self.current_page, gen), daemon=True).start()
-        else:
-            self.load_data_async()
+        self._navigate_search(self.current_page)
 
     def next_page(self):
         if self.loading:
             return
-        if self.show_downloaded == 3:
+        if self.show_downloaded == DOWNLOADED_TAB:
             if not self._all_downloaded_works:
                 return
             if self.current_tags or self.keyword_query or self.circle_query:
@@ -343,22 +340,7 @@ class NavigationMixin:
         self._nav_debounce_id = self.root.after(300, self._clear_nav_debounce)
         self.current_page += 1
         self.page_var.set(str(self.current_page))
-        if self.current_tags:
-            self.search_by_tag(self.current_page)
-        elif self.circle_query:
-            self._bump_generation()
-            gen = self._nav_generation
-            self.loading = True
-            self.show_loading()
-            threading.Thread(target=self._search_by_circle_async, args=(self.current_page, gen), daemon=True).start()
-        elif self.keyword_query:
-            self._bump_generation()
-            gen = self._nav_generation
-            self.loading = True
-            self.show_loading()
-            threading.Thread(target=self._search_by_keyword_async, args=(self.current_page, gen), daemon=True).start()
-        else:
-            self.load_data_async()
+        self._navigate_search(self.current_page)
 
     def prev_work(self):
         if self.works and self.current_work_index > 0:
@@ -369,7 +351,7 @@ class NavigationMixin:
             self.show_work_detail(self.current_work_index + 1)
 
     def update_buttons(self):
-        if self.show_downloaded == 3:
+        if self.show_downloaded == DOWNLOADED_TAB:
             if not self._all_downloaded_works:
                 self.prev_btn.config(state=tk.DISABLED)
                 self.next_btn.config(state=tk.DISABLED)

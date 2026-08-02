@@ -17,10 +17,26 @@ class TranslatorService:
     def __init__(self):
         self._cache: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
+        # 初始化配置属性，避免 update_config 未调用时 _translate_thread 访问 _base_url 抛 AttributeError
+        self._api_key = ""
+        self._base_url = ""
+        self._model = ""
+        self._thinking_enabled = True
         self._session = requests.Session()
         self._session.headers.update({
             "Content-Type": "application/json"
         })
+
+    def _safe_callback(self, callback: Callable[[Optional[str]], None], result: Optional[str]):
+        """安全调用回调，捕获异常并记录日志。
+
+        _translate_thread 中 7 处 callback 调用都有 try/except 包裹（约 4 行 × 7 = 28 行重复），
+        提取为公共方法消除重复。
+        """
+        try:
+            callback(result)
+        except Exception:
+            logger.exception("翻译回调异常")
 
     def update_config(self, api_key: str, base_url: str, model: str, thinking_enabled: bool = True):
         """更新 API 配置"""
@@ -33,9 +49,11 @@ class TranslatorService:
         self._base_url = self._base_url.rstrip('/')
         self._model = model
         self._thinking_enabled = thinking_enabled
-        self._session.headers.update({
-            "Authorization": f"Bearer {api_key}"
-        })
+        # 仅更新 Authorization，保留 session 其他配置（避免丢失 thinking 等自定义头）
+        with self._lock:
+            self._session.headers.update({
+                "Authorization": f"Bearer {api_key}"
+            })
 
     def translate(self, text: str, callback: Callable[[Optional[str]], None], timeout: Optional[int] = None):
         """
@@ -49,26 +67,23 @@ class TranslatorService:
         """
         if timeout is None:
             timeout = 90 if getattr(self, '_thinking_enabled', True) else 30
+        # 空文本直接回调 None，不启动翻译线程
         if not text or not text.strip():
-            try:
-                callback(None)
-            except Exception as e:
-                logger.error(f"翻译回调异常: {e}")
+            self._safe_callback(callback, None)
             return
 
+        # 缓存命中：直接回调缓存结果，不启动翻译线程
         with self._lock:
             if text in self._cache:
                 cached = self._cache[text]
                 if cached and cached.strip():
                     self._cache.move_to_end(text)
-                    try:
-                        callback(cached)
-                    except Exception as e:
-                        logger.error(f"翻译回调异常: {e}")
+                    self._safe_callback(callback, cached)
                     return
                 else:
                     del self._cache[text]
 
+        # 缓存未命中：启动翻译线程
         threading.Thread(
             target=self._translate_thread,
             args=(text, callback, timeout),
@@ -79,16 +94,13 @@ class TranslatorService:
         """翻译线程，带超时保护"""
         start_time = time.time()
         try:
-            if not hasattr(self, '_api_key') or not self._api_key:
+            if not self._api_key:
                 logger.error("未配置 API Key")
-                try:
-                    callback(None)
-                except Exception as e:
-                    logger.error(f"翻译回调异常: {e}")
+                self._safe_callback(callback, None)
                 return
 
             url = f"{self._base_url}/chat/completions"
-            thinking_enabled = getattr(self, '_thinking_enabled', True)
+            thinking_enabled = self._thinking_enabled
             payload = {
                 "model": self._model,
                 "messages": [
@@ -122,10 +134,7 @@ class TranslatorService:
 
             if not translated:
                 logger.warning("翻译返回空结果")
-                try:
-                    callback(None)
-                except Exception as e:
-                    logger.error(f"翻译回调异常: {e}")
+                self._safe_callback(callback, None)
                 return
 
             with self._lock:
@@ -135,43 +144,31 @@ class TranslatorService:
                     self._cache.popitem(last=False)
 
             elapsed = time.time() - start_time
-            logger.debug(f"翻译完成，耗时 {elapsed:.2f} 秒: {text[:30]}...")
-            try:
-                callback(translated)
-            except Exception as e:
-                logger.error(f"翻译回调异常: {e}")
+            logger.debug("翻译完成，耗时 %.2f 秒: %s...", elapsed, text[:30])
+            self._safe_callback(callback, translated)
 
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             elapsed = time.time() - start_time
-            logger.error(f"翻译请求超时 ({elapsed:.1f}s): {e}")
-            try:
-                callback(None)
-            except Exception as cb_err:
-                logger.error(f"翻译回调异常: {cb_err}")
+            logger.error("翻译请求超时 (%.1fs)", elapsed)
+            self._safe_callback(callback, None)
         except requests.exceptions.RequestException as e:
             elapsed = time.time() - start_time
-            logger.error(f"翻译请求失败 ({elapsed:.1f}s): {e}")
-            self._session = requests.Session()
-            self._session.headers.update({
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {getattr(self, '_api_key', '')}"
-            })
-            try:
-                callback(None)
-            except Exception as cb_err:
-                logger.error(f"翻译回调异常: {cb_err}")
+            logger.error("翻译请求失败 (%.1fs): %s", elapsed, e)
+            # 重建 session：仅清空连接池，保留原有 headers（避免丢失 thinking 等配置）
+            with self._lock:
+                self._session.close()
+                self._session = requests.Session()
+                self._session.headers.update({
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self._api_key}"
+                })
+            self._safe_callback(callback, None)
         except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logger.error(f"解析翻译结果失败: {e}")
-            try:
-                callback(None)
-            except Exception as cb_err:
-                logger.error(f"翻译回调异常: {cb_err}")
-        except Exception as e:
-            logger.error(f"翻译异常: {e}")
-            try:
-                callback(None)
-            except Exception as cb_err:
-                logger.error(f"翻译回调异常: {cb_err}")
+            logger.error("解析翻译结果失败: %s", e)
+            self._safe_callback(callback, None)
+        except Exception:
+            logger.exception("翻译异常")
+            self._safe_callback(callback, None)
 
     def invalidate(self, text: str):
         """清除指定文本的翻译缓存"""
@@ -193,11 +190,19 @@ class TranslatorService:
 
 
 _translator: Optional[TranslatorService] = None
+_translator_lock = threading.Lock()
 
 
 def get_translator() -> TranslatorService:
-    """获取全局翻译服务实例"""
+    """获取全局翻译服务实例（线程安全单例）。
+
+    加锁保护单例创建：多线程同时首次调用（如启动时多个 list_card 并发翻译）
+    会创建多个实例，最后一个胜出，前几个的缓存丢失。
+    """
     global _translator
     if _translator is None:
-        _translator = TranslatorService()
+        with _translator_lock:
+            if _translator is None:
+                _translator = TranslatorService()
     return _translator
+

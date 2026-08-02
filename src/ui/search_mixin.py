@@ -3,6 +3,7 @@ from tkinter import messagebox
 import threading
 
 from ..api_client import get_api_client
+from .fonts import SMALL
 
 
 class SearchMixin:
@@ -119,10 +120,10 @@ class SearchMixin:
                 tag_frame = tk.Frame(self.search_tags_frame, bg="#FF9800", padx=4, pady=1)
                 tag_frame.pack(side=tk.LEFT, padx=1)
                 tag_label = tk.Label(tag_frame, text=tag, bg="#FF9800", fg="white",
-                                     font=("Microsoft YaHei UI", 9))
+                                     font=SMALL)
                 tag_label.pack(side=tk.LEFT)
                 close_btn = tk.Label(tag_frame, text="✕", bg="#FF9800", fg="white",
-                                     font=("Microsoft YaHei UI", 9), cursor="hand2")
+                                     font=SMALL, cursor="hand2")
                 close_btn.pack(side=tk.LEFT, padx=(3, 0))
                 close_btn.bind("<Button-1>", lambda e, t=tag: self._remove_tag(t))
         for widget in existing[len(self.current_tags):]:
@@ -242,10 +243,10 @@ class SearchMixin:
             frame = tk.Frame(self.search_tags_frame, bg="#2196F3", padx=4, pady=1)
             frame.pack(side=tk.LEFT)
             label = tk.Label(frame, text=self.keyword_query, bg="#2196F3", fg="white",
-                             font=("Microsoft YaHei UI", 9))
+                             font=SMALL)
             label.pack(side=tk.LEFT)
             close_btn = tk.Label(frame, text="✕", bg="#2196F3", fg="white",
-                                 font=("Microsoft YaHei UI", 9), cursor="hand2")
+                                 font=SMALL, cursor="hand2")
             close_btn.pack(side=tk.LEFT, padx=(3, 0))
             close_btn.bind("<Button-1>", lambda e: self.clear_keyword_search())
         for widget in existing[1:]:
@@ -338,10 +339,10 @@ class SearchMixin:
             frame = tk.Frame(self.search_tags_frame, bg="#E91E63", padx=4, pady=1)
             frame.pack(side=tk.LEFT)
             label = tk.Label(frame, text=f"厂商: {self.circle_query}", bg="#E91E63", fg="white",
-                             font=("Microsoft YaHei UI", 9))
+                             font=SMALL)
             label.pack(side=tk.LEFT)
             close_btn = tk.Label(frame, text="✕", bg="#E91E63", fg="white",
-                                 font=("Microsoft YaHei UI", 9), cursor="hand2")
+                                 font=SMALL, cursor="hand2")
             close_btn.pack(side=tk.LEFT, padx=(3, 0))
             close_btn.bind("<Button-1>", lambda e: self.clear_circle_search())
         for widget in existing[1:]:

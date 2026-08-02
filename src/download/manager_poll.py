@@ -320,29 +320,30 @@ class DownloadPollMixin:
             if task.status == TaskStatus.COMPLETED:
                 self._on_task_completed(task)
 
-    def _retry_task(self, task):
-        import random
+    def _cleanup_and_reset_task(self, task, thread_join_timeout):
+        """清理旧下载线程和进度数据，重置 task 字段。
 
-        wait_time = 5 + random.randint(0, 10)
-        logger.info("[重试] %s 等待 %d 秒后重试 (第 %d 次)", task.work_id, wait_time, task.retry_count)
-        time.sleep(wait_time)
+        _retry_task 和 _auto_restart_slow_task 共用的清理逻辑（v1.52.0 修复时两处重复）。
 
+        Args:
+            task: 要清理的下载任务
+            thread_join_timeout: 等待旧下载线程的超时秒数（重试 30s，低速重启 120s）
+        """
         # 等待旧下载线程结束，防止重复下载
         old_threads = task.download_threads
         if old_threads:
             for t in old_threads:
-                t.join(timeout=30)
+                t.join(timeout=thread_join_timeout)
 
         if task.download_method == "aria2":
             from .downloader import remove_aria2_downloads, purge_aria2_downloads
             remove_aria2_downloads(task.gids)
             purge_aria2_downloads()
-
-        # 清理 _download_progress 中的旧进度记录，防止 poll 看到旧的 "error" 状态立即再次触发重试
-        if task.download_method == "direct" and task.direct_task_ids:
+        else:
+            # 清理 _download_progress 中的旧进度记录，防止 poll 看到旧的 "error" 状态立即再次触发重试
             from .downloader_direct import _progress_lock, _download_progress
             with _progress_lock:
-                for tid in task.direct_task_ids:
+                for tid in list(task.direct_task_ids):
                     _download_progress.pop(tid, None)
 
         with self._tasks_lock:
@@ -353,6 +354,16 @@ class DownloadPollMixin:
             task.speed = 0
             task.download_threads = []
             task.peak_total_bytes = 0
+
+    def _retry_task(self, task):
+        import random
+
+        wait_time = 5 + random.randint(0, 10)
+        logger.info("[重试] %s 等待 %d 秒后重试 (第 %d 次)", task.work_id, wait_time, task.retry_count)
+        time.sleep(wait_time)
+
+        # 提取公共清理逻辑（重试等待 30s，低速重启 120s）
+        self._cleanup_and_reset_task(task, thread_join_timeout=30)
 
         self._submit_task(task.work, task.files, task)
 
@@ -392,27 +403,11 @@ class DownloadPollMixin:
             if not current or current.status != TaskStatus.DOWNLOADING:
                 return
 
-        # 等待旧下载线程结束，防止与 _download_progress 清理/新下载线程冲突
-        old_threads = task.download_threads
-        if old_threads:
-            for t in old_threads:
-                t.join(timeout=120)  # 大文件低速下载可能需要较长时间
+        # 提取公共清理逻辑（大文件低速下载可能需要较长时间，等待 120s）
+        self._cleanup_and_reset_task(task, thread_join_timeout=120)
 
-        if task.download_method == "aria2":
-            from .downloader import remove_aria2_downloads, purge_aria2_downloads
-            remove_aria2_downloads(task.gids)
-            purge_aria2_downloads()
-        else:
-            from .downloader_direct import _progress_lock, _download_progress
-            with _progress_lock:
-                for tid in list(task.direct_task_ids):
-                    _download_progress.pop(tid, None)
         with self._tasks_lock:
-            task.gids.clear()
-            task.direct_task_ids.clear()
-            task.total_bytes = 0
-            task.completed_bytes = 0
-            task.speed = 0
             task.status = TaskStatus.SUBMITTING
         self._persist_task(task)
         self._submit_task(task.work, task.files, task)
+

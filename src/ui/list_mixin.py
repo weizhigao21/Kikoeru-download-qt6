@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import ImageTk
 
 from .list_card import ListCardMixin
+from .fonts import TITLE
 
 logger = logging.getLogger('list_mixin')
 
@@ -31,7 +32,7 @@ class ListMixin(ListCardMixin):
                         pass
                 setattr(self, attr, None)
         self.loading_label = ttk.Label(self.scrollable_frame, text="正在加载数据...",
-                                       font=("Microsoft YaHei UI", 14))
+                                       font=TITLE)
         self.loading_label.pack(pady=30)
         self.loading_bar = ttk.Progressbar(self.scrollable_frame, mode='indeterminate', length=200)
         self.loading_bar.pack(pady=10)
@@ -196,7 +197,7 @@ class ListMixin(ListCardMixin):
             self._empty_widgets = []
         empty_frame = tk.Frame(self.scrollable_frame, bg="#f0f0f0")
         empty_frame.pack(pady=50)
-        tk.Label(empty_frame, text="暂无数据", font=("Microsoft YaHei UI", 14),
+        tk.Label(empty_frame, text="暂无数据", font=TITLE,
                  foreground="gray", bg="#f0f0f0").pack()
         self._empty_widgets.append(empty_frame)
 

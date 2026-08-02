@@ -3,10 +3,18 @@ import threading
 
 
 class EventMixin:
+    _MAX_SEARCH_HISTORY = 50
+
     def _push_search_history(self, state):
         self.search_history = self.search_history[:self.current_search_index + 1]
         self.search_history.append(state)
-        self.current_search_index = len(self.search_history) - 1
+        # 限制历史长度，避免长期使用内存增长
+        if len(self.search_history) > self._MAX_SEARCH_HISTORY:
+            overflow = len(self.search_history) - self._MAX_SEARCH_HISTORY
+            self.search_history = self.search_history[overflow:]
+            self.current_search_index = max(0, self.current_search_index - overflow)
+        else:
+            self.current_search_index = len(self.search_history) - 1
         self._update_back_button()
 
     def _update_back_button(self):
@@ -46,24 +54,40 @@ class EventMixin:
             self.circle_query = ""
             self.current_page = state.get("page", 1)
             self.page_var.set(str(self.current_page))
-            self._update_keyword_search_display()
-            self.status_label.config(text=f"正在搜索: {self.keyword_query} (第{self.current_page}页)...")
-            self.loading = True
-            gen = self._nav_generation
-            self.show_loading()
-            threading.Thread(target=self._search_by_keyword_async, args=(self.current_page, gen), daemon=True).start()
+            self._restore_async_search(
+                "keyword",
+                f"正在搜索: {self.keyword_query} (第{self.current_page}页)...",
+                self._update_keyword_search_display,
+                self._search_by_keyword_async,
+            )
         elif search_type == "circle":
             self.circle_query = state.get("circle", "")
             self.current_tags = []
             self.keyword_query = ""
             self.current_page = state.get("page", 1)
             self.page_var.set(str(self.current_page))
-            self._update_circle_search_display()
-            self.status_label.config(text=f"正在搜索厂商: {self.circle_query} (第{self.current_page}页)...")
-            self.loading = True
-            gen = self._nav_generation
-            self.show_loading()
-            threading.Thread(target=self._search_by_circle_async, args=(self.current_page, gen), daemon=True).start()
+            self._restore_async_search(
+                "circle",
+                f"正在搜索厂商: {self.circle_query} (第{self.current_page}页)...",
+                self._update_circle_search_display,
+                self._search_by_circle_async,
+            )
+
+    def _restore_async_search(self, search_type, status_text, update_display, async_method):
+        """恢复 keyword/circle 类型的异步搜索状态（两者结构完全相同）。
+
+        Args:
+            search_type: 仅用于语义标记（"keyword"/"circle"）
+            status_text: 状态栏显示文本
+            update_display: 更新搜索 UI 的回调
+            async_method: 实际执行搜索的异步方法
+        """
+        self.status_label.config(text=status_text)
+        self.loading = True
+        gen = self._nav_generation
+        update_display()
+        self.show_loading()
+        threading.Thread(target=async_method, args=(self.current_page, gen), daemon=True).start()
 
     def clear_search_history(self):
         self.search_history = [{"type": "recommend", "page": 1}]
@@ -100,61 +124,3 @@ class EventMixin:
         self.root.bind("<Button-4>", lambda e: self._on_linux_scroll(e, -1))
         self.root.bind("<Button-5>", lambda e: self._on_linux_scroll(e, 1))
         self.root.bind("<Configure>", self._on_root_resize)
-
-    def _on_root_resize(self, event=None):
-        self._schedule_canvas_configure()
-
-    def _on_escape(self):
-        if self.keyword_query or self.current_tags or self.circle_query:
-            self.search_var.set("")
-            self.keyword_query = ""
-            self.current_tags = []
-            self.circle_query = ""
-            self.search_chips.clear_chips()
-            self.search_chips.hide()
-            self.search_button.grid()
-            self.title_label.grid()
-            self.btn_row.grid_remove()
-            self.page_var.set("1")
-            self.current_page = 1
-            self.data_loaded = False
-            self.clear_all_items()
-            self.refresh_works()
-            return "break"
-
-    def _shortcut_prev(self):
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Entry):
-            return
-        self.prev_page()
-
-    def _shortcut_next(self):
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Entry):
-            return
-        self.next_page()
-
-    def _shortcut_download(self):
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Entry):
-            return
-        if self.current_work_index >= 0 and self.current_work_index < len(self.works):
-            display_title = self._get_display_title(self.current_work_index)
-            self.open_download_window(self.works[self.current_work_index], display_title)
-        return "break"
-
-    def _shortcut_select_prev(self):
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Entry):
-            return
-        if self.works and self.current_work_index > 0:
-            self.show_work_detail(self.current_work_index - 1)
-        return "break"
-
-    def _shortcut_select_next(self):
-        widget = self.root.focus_get()
-        if isinstance(widget, tk.Entry):
-            return
-        if self.works and self.current_work_index < len(self.works) - 1:
-            self.show_work_detail(self.current_work_index + 1)
-        return "break"

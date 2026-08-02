@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
 
 一个基于 Tkinter 的桌面应用程序，用于浏览和下载 ASMR 音声作品。
 
@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v1.54.0**（当前版本）
+**v1.59.3**（当前版本）
 
 ## 功能特性
 
@@ -113,7 +113,7 @@
 - `src/ui/filter_mixin.py` — 筛选排序（只看已下载、内存排序、封面补全）
 - `src/gui_app_ui.py` / `src/gui_app_nav.py` / `src/gui_app_events.py` — 主窗口 Mixin（`UISetupMixin` 样式/UI构建、`NavigationMixin` 数据加载/分页、`EventMixin` 搜索历史/快捷键）
 - `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
-- `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、翻译缓存）
+- `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、线程安全单例、翻译缓存、思考模式、`_safe_callback` 异常保护）
 - 通过 Mixin 多继承组合到 WorkApp，MRO：`WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin`
 
 ```
@@ -124,7 +124,7 @@ g:\code\音声下载\
 ├── src/gui_app_events.py       # EventMixin（搜索历史、键盘快捷键、鼠标滚轮事件）
 ├── src/                        # 核心业务模块包
 │   ├── __init__.py             # 统一导出
-│   ├── config.py               # 配置读取（带默认值容错）
+│   ├── config.py               # 配置读取（默认值合并 + 解析错误日志 + 版本号常量）
 │   ├── api_client.py           # API 请求客户端（带指数退避重试 + 缓存去重）
 │   ├── database/
 │   │   ├── __init__.py
@@ -142,7 +142,9 @@ g:\code\音声下载\
 │   │   └── manager_poll.py     # DownloadPollMixin（轮询进度、重试、低速自重启）
 │   ├── services/
 │   │   ├── __init__.py
-│   │   └── translator.py       # AI 翻译服务（OpenAI 兼容 API、翻译缓存）
+│   │   ├── translator.py          # AI 翻译服务（线程安全单例、翻译缓存、思考模式、`_safe_callback`）
+│   │   ├── subtitle_converter.py  # VTT→LRC 字幕转换（时间戳进位、NOTE 块空行结束、多编码）
+│   │   └── text_converter.py      # 繁简转换（UTF-8/Shift-JIS 回退、文件名+内容转换）
 │   └── ui/
 │       ├── __init__.py
 │       ├── detail_mixin.py     # DetailMixin（详情面板构建、展示、懒加载）
@@ -204,14 +206,14 @@ python import_downloaded.py
 API 请求客户端，负责与服务器通信，所有请求支持指数退避重试：
 - 内置 LRU 结果缓存（最多 100 条，TTL 120 秒），搜索和列表结果自动缓存
 - 使用 `requests.Session` 复用 TCP 连接，减少握手开销
-- `fetch_works_page(page)` - 获取推荐作品列表分页
-- `fetch_latest_works_page(page)` - 获取最新收录作品列表
-- `fetch_work_detail(rj_id)` - 获取单个作品详情（自动处理前导零）
+- `_InFlight` 并发去重：相同 key 的并发请求只执行一次，等待者复用首个调用者的结果或异常
+- 429 限流响应优先读取 `Retry-After` 头（上限 60s），回退到指数退避
+- `fetch_works_page(page)` / `fetch_latest_works_page(page)` - 推荐/最新作品列表分页（共用 `_fetch_works_page_impl`）
+- `fetch_work_detail(rj_id)` - 获取单个作品详情（`strip_rj_prefix` 处理前缀）
 - `fetch_tracks(rj_id)` - 获取作品文件列表
-- `search_by_tag(tags, page)` - 按标签搜索作品（支持多标签 AND 搜索）
-- `search_by_keyword(keyword, page)` - 按关键词模糊搜索
-- `search_by_circle(circle_name, page)` - 按厂商名称搜索作品
+- `search_by_tag(tags, page)` / `search_by_keyword(keyword, page)` / `search_by_circle(circle_name, page)` - 三种搜索共用 `_parse_search_response` + `_search_impl`
 - `clear_api_cache()` - 清除 API 结果缓存
+- `APIClient(session=None, cache=None)` - 薄封装类，支持依赖注入便于测试
 
 ### src/database/cache.py
 图片缓存管理器，实现两级缓存策略：
@@ -232,28 +234,29 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 
 ### src/download/downloader.py
 下载管理模块，负责：
-- 通过 Aria2 下载文件（异步执行，连接复用）
-- 保存封面图片和标签文件
+- 通过 Aria2 下载文件（异步执行，全局代理复用）
+- 保存封面图片和标签文件（封面 ID 解析用 `strip_rj_prefix`）
 - 管理下载历史
 - `poll_download_progress(gids)` - 轮询 Aria2 真实下载进度
-- `ensure_aria2_running()` - 下载时自动检测并启动 Aria2
+- `ensure_aria2_running()` - 下载时自动检测并启动 Aria2（无 `shell=True`）
 - `purge_aria2_downloads()` - 清除 Aria2 下载结果缓存
 
 ### src/download/downloader_direct.py
 直接下载模块，不依赖 Aria2：
 - 使用 requests 直接 HTTP 下载文件
 - 支持断点续传和进度显示
-- 429 限流自动重试（最多 5 次，指数退避）
+- 429 限流自动重试（最多 5 次，优先读 `Retry-After` 头，回退指数退避）
+- `get_remote_file_size(url)` - 获取远程文件大小（HEAD 失败回退 GET stream）
 - `DirectDownloader` - 直接下载器类
 - `poll_direct_progress(task_ids)` - 轮询直接下载进度
 
 ### src/download/manager.py + manager_core.py + manager_poll.py + models.py
 全局下载管理器（线程安全单例），拆分为 4 个文件，核心调度层：
 
-- **models.py** — `TaskStatus`（任务状态枚举：submitting/downloading/completed/failed/cancelled/queued）、`DownloadTask`（数据模型：work_id/gids/进度/状态/速度）
-- **manager.py** — `DownloadManager` 主类（单例）：初始化、`submit(work, files)` 提交即返回、`cancel/retry` 取消/重试、`get_all_tasks/get_active_tasks` 查询、`restore_pending_tasks` 恢复持久化任务、`add_observer` 观察者模式通知
-- **manager_core.py** — `DownloadCoreMixin`：Aria2/直接下载提交逻辑、文件完整性检查（跳过已完整文件）、任务持久化/状态同步、队列模式处理
-- **manager_poll.py** — `DownloadPollMixin`：全局统一轮询循环（有任务自动启动/全完成自动退出）、Aria2/直接下载进度合并、失败自动重试（最多 3 次）、低速检测与自动重启（可配置阈值/时长/次数）
+- **models.py** — `TaskStatus`（任务状态枚举：submitting/downloading/completed/failed/cancelled/queued/converting）、`DownloadTask`（数据模型：work_id/gids/进度/状态/速度）
+- **manager.py** — `DownloadManager` 主类（单例）：初始化、`submit(work, files)` 提交即返回（含 CONVERTING 重复防护）、`cancel/retry` 取消/重试、`get_all_tasks/get_active_tasks` 查询、`restore_pending_tasks` 恢复持久化任务、`add_observer` 观察者模式通知
+- **manager_core.py** — `DownloadCoreMixin`：Aria2/直接下载提交逻辑、`_check_files_existence`/`_handle_task_completion`/`_safe_persist` 公共方法、队列模式处理
+- **manager_poll.py** — `DownloadPollMixin`：全局统一轮询循环（永不退出 + `_poll_wake_event` 唤醒）、Aria2/直接下载进度合并、失败自动重试（最多 3 次）、`_cleanup_and_reset_task` 公共清理方法、低速检测与自动重启（可配置阈值/时长/次数）
 
 ### src/ui/tree_selector.py
 树状图选择工具类，提供：
@@ -267,10 +270,10 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 ### WorkApp (src/gui_app.py + src/gui_app_ui.py + src/gui_app_nav.py + src/gui_app_events.py)
 主应用程序类，通过 Mixin 多继承组合功能模块（拆分为 4 个文件，总行数从 891 行降至各文件均 ≤ 366 行）：
 
-- **src/gui_app.py**（272行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`main` 入口
-- **src/gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 全部控件构建、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理
-- **src/gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航、`update_buttons()` 按钮状态、`refresh_data()` 数据刷新
-- **src/gui_app_events.py**（142行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航、`_bind_shortcuts()` 全局快捷键绑定、`_on_mouse_wheel()` 滚轮事件、`_on_escape()` ESC 清除搜索
+- **src/gui_app.py**（272行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`_on_close()` 窗口关闭资源释放、`main` 入口
+- **src/gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 编排（拆分为 `_build_top_bar`/`_build_list_area`/`_build_detail_area`/`_build_bottom_bar` 四个私有方法）、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理（均含 `winfo_exists` 去重）
+- **src/gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载（闭包捕获 tab/page 快照避免竞态）、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航（共用 `_navigate_search()` 公共方法）、`update_buttons()` 按钮状态管理按钮状态、`refresh_data()` 数据刷新
+- **src/gui_app_events.py**（126行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航（上限 50 条）、`_restore_search_state()` 搜索状态恢复（共用 `_restore_async_search()` 公共方法）、`_bind_shortcuts()` 鼠标滚轮/resize 绑定、`_on_mouse_wheel()`/`_on_linux_scroll()` 滚轮事件
 
 Mixin 继承链（MRO 从左到右，深度优先）：
 ```

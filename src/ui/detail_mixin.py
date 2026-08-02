@@ -7,6 +7,7 @@ from PIL import ImageTk
 
 from ..api_client import get_api_client
 from .detail_actions import DetailActionsMixin
+from .fonts import DEFAULT, SMALL, TINY, BODY, LABEL, EMOJI
 
 logger = logging.getLogger('detail_mixin')
 
@@ -39,7 +40,7 @@ class DetailMixin(DetailActionsMixin):
             )
         )
 
-        ttk.Label(self.detail_scrollable, text="标题:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="标题:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self._detail_original_title = ""
         self._detail_translated_title = ""
         self._detail_show_translated = False
@@ -48,63 +49,63 @@ class DetailMixin(DetailActionsMixin):
         detail_title_frame.pack(anchor=tk.W, fill=tk.X, pady=(0, 10))
 
         self.info_labels["title"] = ttk.Label(
-            detail_title_frame, text="", font=("Microsoft JhengHei UI", 11), wraplength=320, justify=tk.LEFT
+            detail_title_frame, text="", font=BODY, wraplength=320, justify=tk.LEFT
         )
         self.info_labels["title"].pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self.detail_toggle_btn = tk.Button(detail_title_frame, text="译", font=("Microsoft YaHei UI", 8),
+        self.detail_toggle_btn = tk.Button(detail_title_frame, text="译", font=TINY,
                                            relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
                                            bg="#E3F2FD", fg="#1976D2", width=2,
                                            command=self._toggle_detail_title)
         self.detail_toggle_btn.pack(side=tk.LEFT, padx=(3, 0))
         self.detail_toggle_btn.pack_forget()
 
-        self.detail_copy_title_btn = tk.Button(detail_title_frame, text="📋", font=("Segoe UI Emoji", 10),
+        self.detail_copy_title_btn = tk.Button(detail_title_frame, text="📋", font=EMOJI,
                                                relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
                                                bg="#f0f0f0", fg="#666666",
                                                command=self._copy_detail_title)
         self.detail_copy_title_btn.pack(side=tk.LEFT, padx=(3, 0))
 
-        ttk.Label(self.detail_scrollable, text="封面:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="封面:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self.image_frame = tk.Frame(self.detail_scrollable, background="#e0e0e0")
         self.image_frame.pack(anchor=tk.W, pady=(0, 10))
         self.image_label = tk.Label(self.image_frame, background="#e0e0e0")
         self.image_label.pack()
 
-        ttk.Label(self.detail_scrollable, text="标签:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="标签:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self.tags_frame = ttk.Frame(self.detail_scrollable)
         self.tags_frame.pack(anchor=tk.W, fill=tk.X, pady=(0, 10))
         self.detail_tags_canvas = tk.Canvas(self.tags_frame, bg="#f0f0f0", height=22, highlightthickness=0)
         self.detail_tags_canvas.pack(anchor=tk.W, fill=tk.X)
         self.detail_tags_canvas._tag_data = []
 
-        ttk.Label(self.detail_scrollable, text="ID:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="ID:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         detail_id_frame = tk.Frame(self.detail_scrollable, bg="#f0f0f0")
         detail_id_frame.pack(anchor=tk.W, pady=(0, 5))
-        self.info_labels["id"] = ttk.Label(detail_id_frame, text="", font=("Microsoft YaHei UI", 10), foreground="blue")
+        self.info_labels["id"] = ttk.Label(detail_id_frame, text="", font=DEFAULT, foreground="blue")
         self.info_labels["id"].pack(side=tk.LEFT)
-        self.detail_copy_id_btn = tk.Button(detail_id_frame, text="📋", font=("Segoe UI Emoji", 10),
+        self.detail_copy_id_btn = tk.Button(detail_id_frame, text="📋", font=EMOJI,
                                             relief=tk.FLAT, padx=3, pady=1, cursor="hand2",
                                             bg="#f0f0f0", fg="#666666",
                                             command=self._copy_detail_id)
         self.detail_copy_id_btn.pack(side=tk.LEFT, padx=(3, 0))
 
-        ttk.Label(self.detail_scrollable, text="厂商:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="厂商:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self.info_labels["circle"] = tk.Label(
-            self.detail_scrollable, text="", font=("Microsoft YaHei UI", 10),
+            self.detail_scrollable, text="", font=DEFAULT,
             fg="#2196F3", bg="#f0f0f0", cursor="hand2", anchor=tk.W, wraplength=360, justify=tk.LEFT
         )
         self.info_labels["circle"].pack(anchor=tk.W, pady=(0, 5))
 
-        ttk.Label(self.detail_scrollable, text="声优:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="声优:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self.info_labels["cv"] = ttk.Label(
-            self.detail_scrollable, text="", font=("Microsoft YaHei UI", 10), wraplength=360, justify=tk.LEFT
+            self.detail_scrollable, text="", font=DEFAULT, wraplength=360, justify=tk.LEFT
         )
         self.info_labels["cv"].pack(anchor=tk.W, pady=(0, 10))
 
-        ttk.Label(self.detail_scrollable, text="其他语言版本:", font=("Microsoft YaHei UI", 11, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(self.detail_scrollable, text="其他语言版本:", font=LABEL).pack(anchor=tk.W, pady=(0, 2))
         self.info_labels["editions"] = ttk.Label(
-            self.detail_scrollable, text="", font=("Microsoft YaHei UI", 10), wraplength=360, justify=tk.LEFT, foreground="gray"
+            self.detail_scrollable, text="", font=DEFAULT, wraplength=360, justify=tk.LEFT, foreground="gray"
         )
         self.info_labels["editions"].pack(anchor=tk.W)
 

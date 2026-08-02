@@ -1,62 +1,10 @@
 import sqlite3
 import json
-import threading
-import time
-from contextlib import contextmanager
 
-_CONNECTION_TIMEOUT = 300
+from .base import BaseDatabaseManager
 
 
-class DatabaseManager:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self._local = threading.local()
-        self._lock = threading.Lock()
-        self._init_db()
-
-    @contextmanager
-    def _connect(self):
-        conn = getattr(self._local, 'conn', None)
-        last_used = getattr(self._local, 'last_used', 0)
-
-        if conn is None or (time.time() - last_used > _CONNECTION_TIMEOUT):
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-4096")
-            self._local.conn = conn
-
-        self._local.last_used = time.time()
-
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            try:
-                conn.close()
-            except Exception:
-                pass
-            self._local.conn = None
-            raise
-
-    def close_all(self):
-        with self._lock:
-            conn = getattr(self._local, 'conn', None)
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                self._local.conn = None
+class DatabaseManager(BaseDatabaseManager):
 
     def _init_db(self):
         with self._connect() as conn:
@@ -125,16 +73,6 @@ class DatabaseManager:
 
             conn.commit()
 
-    @staticmethod
-    def _safe_json_load(s, default=None):
-        if not s:
-            return default if default is not None else ([] if default == [] else {})
-        try:
-            data = json.loads(s)
-            return data if isinstance(data, (list, dict)) else (default or [])
-        except (json.JSONDecodeError, TypeError):
-            return default if default is not None else []
-
     def get_works_by_page(self, page: int) -> list:
         with self._connect() as conn:
             cursor = conn.cursor()
@@ -185,8 +123,9 @@ class DatabaseManager:
                 return None
             vas_str = row["vas"] if "vas" in row.keys() else ""
             circle_str = row["circle_data"] if "circle_data" in row.keys() else ""
-            vas = json.loads(vas_str) if vas_str else []
-            circle = json.loads(circle_str) if circle_str else {}
+            # 使用 _safe_json_load 容错处理损坏的 JSON，与同类其他方法一致
+            vas = self._safe_json_load(vas_str, [])
+            circle = self._safe_json_load(circle_str, {})
             if vas or (circle and isinstance(circle, dict) and circle.get("name")):
                 return {"vas": vas, "circle": circle}
             return None

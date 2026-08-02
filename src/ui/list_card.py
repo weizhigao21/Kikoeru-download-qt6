@@ -1,21 +1,27 @@
 import tkinter as tk
-from tkinter import font as tkfont
 import logging
 import time
 
 from .. import config as _config
 from ..services.translator import get_translator
+from .fonts import get_tag_font, DEFAULT, SMALL, TINY, BODY, EMOJI
 
 logger = logging.getLogger('list_card')
 
-_TAG_FONT = None
-
-
-def _get_tag_font():
-    global _TAG_FONT
-    if _TAG_FONT is None:
-        _TAG_FONT = tkfont.Font(family="Microsoft YaHei UI", size=9)
-    return _TAG_FONT
+# COLORS 默认值常量：_create_slot 和 _update_slot 两处重复的 11 行字典提取为此常量
+_DEFAULT_COLORS = {
+    "bg": "#f5f5f5",
+    "card_bg": "#ffffff",
+    "primary": "#1976D2",
+    "primary_light": "#E3F2FD",
+    "accent": "#FF9800",
+    "success": "#4CAF50",
+    "error": "#F44336",
+    "text": "#333333",
+    "text_secondary": "#666666",
+    "text_hint": "#999999",
+    "border": "#e0e0e0",
+}
 
 
 def _hover_children(widget, from_bg, to_bg):
@@ -37,19 +43,7 @@ def _hover_children(widget, from_bg, to_bg):
 
 class ListCardMixin:
     def _create_slot(self):
-        colors = getattr(self, 'COLORS', {
-            "bg": "#f5f5f5",
-            "card_bg": "#ffffff",
-            "primary": "#1976D2",
-            "primary_light": "#E3F2FD",
-            "accent": "#FF9800",
-            "success": "#4CAF50",
-            "error": "#F44336",
-            "text": "#333333",
-            "text_secondary": "#666666",
-            "text_hint": "#999999",
-            "border": "#e0e0e0",
-        })
+        colors = getattr(self, 'COLORS', _DEFAULT_COLORS)
 
         frame = tk.Frame(self.scrollable_frame, bg=colors["card_bg"], relief=tk.SOLID, bd=1)
 
@@ -70,7 +64,7 @@ class ListCardMixin:
         img_container.pack(side=tk.LEFT, padx=(0, 12))
 
         img_label = tk.Label(img_container, text="加载中", bg=colors["border"], fg=colors["text_hint"],
-                            font=("Microsoft YaHei UI", 9))
+                            font=SMALL)
         img_label.pack(padx=2, pady=2)
 
         text_frame = tk.Frame(item_frame, bg=colors["card_bg"])
@@ -79,7 +73,7 @@ class ListCardMixin:
         title_frame = tk.Frame(text_frame, bg=colors["card_bg"])
         title_frame.pack(fill=tk.X, pady=(0, 4))
 
-        title_label = tk.Label(title_frame, text="", font=("Microsoft JhengHei UI", 11),
+        title_label = tk.Label(title_frame, text="", font=BODY,
                                cursor="hand2", bg=colors["card_bg"], fg=colors["text"], anchor=tk.W, wraplength=420)
         title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -87,17 +81,17 @@ class ListCardMixin:
         btn_column.pack(side=tk.LEFT, padx=(6, 0))
 
         downloaded_label = tk.Label(btn_column, text="✓ 已下载", bg=colors["primary"], fg="white",
-                                     font=("Microsoft YaHei UI", 8, "bold"), padx=6, pady=2)
+                                     font=TINY, padx=6, pady=2)
         downloaded_label.pack(anchor=tk.E, pady=(0, 1))
         downloaded_label.pack_forget()
 
-        toggle_btn = tk.Button(btn_column, text="译", font=("Microsoft YaHei UI", 8),
+        toggle_btn = tk.Button(btn_column, text="译", font=TINY,
                                relief=tk.FLAT, padx=4, pady=1, cursor="hand2",
                                bg=colors["primary_light"], fg=colors["primary"], width=2)
         toggle_btn.pack(anchor=tk.E, pady=(1, 0))
         toggle_btn.pack_forget()
 
-        edit_btn = tk.Button(btn_column, text="编辑", font=("Microsoft YaHei UI", 8),
+        edit_btn = tk.Button(btn_column, text="编辑", font=TINY,
                              relief=tk.FLAT, padx=4, pady=1, cursor="hand2",
                              bg="#FFF3E0", fg=colors["accent"], width=3)
         edit_btn.pack(anchor=tk.E, pady=(1, 0))
@@ -111,17 +105,17 @@ class ListCardMixin:
 
         id_frame = tk.Frame(text_frame, bg=colors["card_bg"])
         id_frame.pack(anchor=tk.W, pady=(6, 0))
-        id_label = tk.Label(id_frame, text="", font=("Microsoft YaHei UI", 9),
+        id_label = tk.Label(id_frame, text="", font=SMALL,
                             foreground=colors["primary"], bg=colors["card_bg"], anchor=tk.W)
         id_label.pack(side=tk.LEFT)
         id_label.bind("<Button-1>", self._on_title_click)
 
-        copy_btn = tk.Button(id_frame, text="📋", font=("Segoe UI Emoji", 10),
+        copy_btn = tk.Button(id_frame, text="📋", font=EMOJI,
                              relief=tk.FLAT, padx=4, pady=1, cursor="hand2",
                              bg=colors["card_bg"], fg=colors["text_secondary"])
         copy_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        translate_btn = tk.Button(id_frame, text="翻译", font=("Microsoft YaHei UI", 9),
+        translate_btn = tk.Button(id_frame, text="翻译", font=SMALL,
                                   relief=tk.FLAT, padx=4, pady=1, cursor="hand2",
                                   bg=colors["card_bg"], fg=colors["success"])
         translate_btn.pack(side=tk.LEFT, padx=(4, 0))
@@ -168,7 +162,7 @@ class ListCardMixin:
             cw = 480
         TAG_COLORS = ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0", "#E91E63",
                        "#00BCD4", "#8BC34A", "#FF5722"]
-        tag_font = _get_tag_font()
+        tag_font = get_tag_font()
         x, y = 2, 2
         row_height = 26
         max_width = cw - 4
@@ -181,7 +175,7 @@ class ListCardMixin:
             rect_id = canvas.create_rectangle(
                 x, y, x + tw, y + 20, fill=color, outline=color, width=0)
             text_id = canvas.create_text(
-                x + tw // 2, y + 10, text=tag, font=("Microsoft YaHei UI", 9),
+                x + tw // 2, y + 10, text=tag, font=SMALL,
                 fill="white", anchor="center")
             canvas._tag_data.append((rect_id, text_id, tag))
             x += tw + 6
@@ -257,19 +251,7 @@ class ListCardMixin:
         else:
             slot['downloaded_label'].pack_forget()
 
-        colors = getattr(self, 'COLORS', {
-            "bg": "#f5f5f5",
-            "card_bg": "#ffffff",
-            "primary": "#1976D2",
-            "primary_light": "#E3F2FD",
-            "accent": "#FF9800",
-            "success": "#4CAF50",
-            "error": "#F44336",
-            "text": "#333333",
-            "text_secondary": "#666666",
-            "text_hint": "#999999",
-            "border": "#e0e0e0",
-        })
+        colors = getattr(self, 'COLORS', _DEFAULT_COLORS)
 
         for w in slot['editions_container'].winfo_children():
             w.destroy()
@@ -287,7 +269,7 @@ class ListCardMixin:
                     ed_text = f"{lang}:{ed_id}"
                     ed_fg = "#9C27B0"
                 ed_label = tk.Label(slot['editions_container'],
-                                    text=ed_text, font=("Microsoft YaHei UI", 8),
+                                    text=ed_text, font=TINY,
                                     foreground=ed_fg, bg=colors["card_bg"], anchor=tk.W, cursor="hand2")
                 ed_label.pack(side=tk.LEFT, padx=(2, 0))
                 ed_label._edition_sid = ed_id
@@ -353,7 +335,7 @@ class ListCardMixin:
                 slot['translate_btn'].config(text="翻译", state=tk.NORMAL,
                                              bg=colors.get("card_bg", "#ffffff"), fg=colors.get("success", "#4CAF50"))
                 self.status_label.config(text="翻译超时，请检查网络或 API 设置", foreground="#f44336")
-                logger.warning(f"翻译超时: {title[:30]}...")
+                logger.warning("翻译超时: %s...", title[:30])
 
         timeout_timer = self.root.after(timeout_ms, on_timeout)
         slot['_translation_timeout_timer'] = timeout_timer
@@ -389,7 +371,7 @@ class ListCardMixin:
                 self.status_label.config(text=f"翻译处理失败：{str(e)}", foreground="#f44336")
             except Exception:
                 pass
-            logger.error(f"_on_translate_result 异常：{e}")
+            logger.error("_on_translate_result 异常：%s", e)
 
     def _apply_translation(self, slot, original, translated, work_id=""):
         try:
@@ -417,7 +399,7 @@ class ListCardMixin:
                 self.status_label.config(text=f"应用翻译失败：{str(e)}", foreground="#f44336")
             except Exception:
                 pass
-            logger.error(f"_apply_translation 异常：{e}")
+            logger.error("_apply_translation 异常：%s", e)
 
     def _toggle_title(self, slot):
         if slot['show_translated']:
@@ -451,11 +433,11 @@ class ListCardMixin:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         tk.Label(main_frame, text=f"原文: {original_title[:40]}...",
-                 font=("Microsoft YaHei UI", 9), fg="gray", bg="#f0f0f0").pack(anchor=tk.W, pady=(0, 10))
+                 font=SMALL, fg="gray", bg="#f0f0f0").pack(anchor=tk.W, pady=(0, 10))
 
-        tk.Label(main_frame, text="翻译:", font=("Microsoft YaHei UI", 10), bg="#f0f0f0").pack(anchor=tk.W)
+        tk.Label(main_frame, text="翻译:", font=DEFAULT, bg="#f0f0f0").pack(anchor=tk.W)
         entry_var = tk.StringVar(value=current_translated)
-        entry = tk.Entry(main_frame, textvariable=entry_var, width=50, font=("Microsoft YaHei UI", 10))
+        entry = tk.Entry(main_frame, textvariable=entry_var, width=50, font=DEFAULT)
         entry.pack(fill=tk.X, pady=(5, 15))
         entry.select_range(0, tk.END)
         entry.focus_set()
@@ -488,11 +470,11 @@ class ListCardMixin:
             self.status_label.config(text="✓ 翻译已删除", foreground="#FF9800")
             edit_win.destroy()
 
-        tk.Button(btn_frame, text="保存", font=("Microsoft YaHei UI", 10),
+        tk.Button(btn_frame, text="保存", font=DEFAULT,
                   bg="#4CAF50", fg="white", padx=12, command=save_edit).pack(side=tk.RIGHT, padx=(10, 0))
-        tk.Button(btn_frame, text="删除翻译", font=("Microsoft YaHei UI", 10),
+        tk.Button(btn_frame, text="删除翻译", font=DEFAULT,
                   bg="#f44336", fg="white", padx=12, command=delete_translation).pack(side=tk.RIGHT, padx=(10, 0))
-        tk.Button(btn_frame, text="取消", font=("Microsoft YaHei UI", 10),
+        tk.Button(btn_frame, text="取消", font=DEFAULT,
                   padx=12, command=edit_win.destroy).pack(side=tk.RIGHT)
 
         edit_win.bind("<Return>", lambda e: save_edit())

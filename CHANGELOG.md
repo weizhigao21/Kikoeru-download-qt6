@@ -1,3 +1,122 @@
+## v1.59.3
+
+- **重构**：字体集中管理模块 `src/ui/fonts.py` — UI 层字体声明原本散落在 8 个文件、92 处硬编码元组（如 `("Microsoft YaHei UI", 10)`），每次调整字体需全局搜索替换，易漏改。新建 `fonts.py` 集中定义 3 个字体族常量（`UI_FONT_FAMILY`/`MONO_FONT_FAMILY`/`EMOJI_FONT_FAMILY`）+ 11 个语义化字体元组（`DEFAULT`/`SMALL`/`BODY`/`TITLE_BOLD`/`MONO_ID`/`EMOJI` 等），8 个 UI 文件改为导入常量。今后改字体族只需改 `fonts.py` 一处
+- **重构**：`list_card.py` 的 `_TAG_FONT` 全局缓存 + `_get_tag_font()` 迁移至 `fonts.py:get_tag_font()` — Canvas 文本测量需 `tkfont.Font` 对象而非元组，统一由 `fonts.py` 提供并惰性缓存，消除 list_card.py 中 `tkfont` 导入和重复缓存定义
+- **统一**：`gui_download_manager.py` 百分比显示字体由 `("Consolas", 9)` 统一为 `MONO_NUM`（`("Consolas", 10)`）— 与 `gui_app_ui.py` 任务栏百分比字体一致，消除历史遗留字号不一致
+
+## v1.59.2
+
+- **回退**：UI 层全部字体由 "Microsoft JhengHei UI" 改回 "Microsoft YaHei UI" — v1.59.0 曾将全局字体统一替换为 JhengHei UI（微米黑），但用户反馈"看着不舒服"。根因：Microsoft JhengHei UI 是繁体中文字体，采用 CNS11643（台湾）字形标准，而项目面向大陆简体用户，应使用 GB 标准字形。"骨""草""过""送" 等字在繁体字形下笔画走势与大陆习惯不同，造成视觉违和。改回 YaHei UI（微软雅黑 UI，Windows 标准 UI 字体，简体 GB 字形）
+- **约定**：特殊符号控件（如 📋 复制按钮）维持 Segoe UI Emoji 字体不变 — 共 3 处（detail_mixin.py:62/86、list_card.py:122），不受全局字体回退影响。原 v1.59.0 为修复 ♡ 符号而全局换字体的做法是错误的，正确做法是局部处理符号控件
+- **更新**：user_profile.md 与 project_memory.md 字体偏好记录同步修正，标注 JhengHei UI 已废弃及原因，避免下次被再次推翻
+
+## v1.59.1
+
+- **修复**：直接下载模式下重试任务报 `ConnectionRefusedError` — 用户从 Aria2 切换到直接下载后重启，持久化的旧任务恢复时 `download_method` 仍为 "aria2"（[manager.py:224](src/download/manager.py) `restore_pending_tasks` 直接读取持久化旧值，不跟随当前全局 `_config.DOWNLOAD_METHOD`）。重试时 `if task.download_method == "aria2":` 守卫为真，调用 `purge_aria2_downloads` 连接未运行的 Aria2 → `WinError 10061`。改为恢复时用当前全局 `DOWNLOAD_METHOD` 覆盖，并在方式变化时记录 info 日志
+- **修复**：`purge_aria2_downloads` / `remove_aria2_downloads` 在 Aria2 未运行时记录完整 traceback — `ConnectionRefusedError`（`OSError` 子类）是预期情况（清理操作时 Aria2 可能已退出或已切换下载模式），不应作为错误记录。新增 `except OSError` 分支静默返回（`logger.debug`），仅非连接类异常才记 `logger.exception`
+
+## v1.59.0
+
+- **修复**：UI 层全部 92 处 "Microsoft YaHei UI" 字体声明统一替换为 "Microsoft JhengHei UI" — 用户明确要求优先使用 "Microsoft JhengHei UI" 以改善中文和特殊符号（如 ♡）在小字号下的可读性。涉及 8 个文件：gui_settings.py（29 处）、list_card.py（16 处）、gui_app_ui.py（13 处）、detail_mixin.py（12 处）、gui_download_manager.py（11 处）、search_mixin.py（6 处）、gui_download.py（3 处）、list_mixin.py（2 处）
+- **删除**：tree_selector.py 中 `TreeBuilder` 和 `SelectionManager` 两个死代码类 — 全项目无调用（仅 `__init__.py` 重导出但无人引用），约 235 行冗余代码（含 `__main__` 示例块）。同步更新 `__init__.py` 移除导入，清理仅被这两个类使用的 `tk`/`Optional`/`Any` 导入
+- **修复**：tree_selector.py `print_tree_structure` 的 `print` 违反项目硬约束 — 改为 `logger.debug` 并用 `%s` 参数化（v1.57.0 下载层同类修复的延续）
+- **修复**：tree_selector.py `notify_selection_changed` 静默吞异常 — `except Exception: pass` 改为 `logger.debug("选择回调执行异常", exc_info=True)`，保留调试信息
+- **修复**：gui_settings.py `save_settings` 残留 `os.fsync(f.fileno())` — v1.44.0 changelog 声称已移除但实际仍存在，强制物理磁盘写入导致配置保存缓慢。删除该调用（`with` 块关闭时已自动 flush）
+- **修复**：gui_settings.py `logger.exception` 冗余异常参数 — `logger.exception("复制 %s 失败: %s", db_name, e)` 中 `e` 参数多余，`logger.exception` 已自动附加异常 traceback。改为 `logger.exception("复制 %s 失败", db_name)`
+- **重构**：gui_download_manager.py 状态映射重复消除 — `_build_active_row` 和 `_update_progress` 两处重复的状态文本+颜色映射逻辑提取为 `_STATUS_MAP` 常量和 `_get_status_text_color` 方法
+- **重构**：gui_download_manager.py 字符串状态比较改为 `TaskStatus` 枚举比较 — 与 v1.55.0 gui_app_ui.py 的重构一致
+- **重构**：list_card.py `_DEFAULT_COLORS` 常量提取 — `_create_slot` 和 `_update_slot` 两处重复的 11 行颜色字典提取为模块级常量
+- **优化**：list_card.py 3 处 logger f-string 改为 `%s` 参数化 — 与 v1.58.0 translator.py 优化一致
+- **修复**：list_card.py 翻译超时计时器未取消 — `_translate_title` 创建的 `after` 计时器在 UI 元素销毁时未取消，可能导致回调访问已销毁控件。添加 `_translation_timeout_timer` 跟踪并在销毁时 `after_cancel`
+- **删除**：gui_download.py 冗余 `_normalize_rj_id` wrapper — v1.55.0 已抽取 `normalize_rj_id` 到 utils.py 并改为薄包装调用，wrapper 本身无存在意义。删除 wrapper，直接调用 `normalize_rj_id`
+
+## v1.58.0
+
+- **修复**：`_translator` 全局单例无锁保护 — `get_translator()` 的 `if _translator is None: _translator = TranslatorService()` 非线程安全。多线程同时首次调用（如启动时多个 list_card 并发翻译）会创建多个实例，最后一个胜出，前几个的缓存丢失。添加 `_translator_lock`，双重检查锁定
+- **修复**：`update_config` 首次调用前属性未初始化 — `__init__` 未设置 `_api_key`/`_base_url`/`_model`/`_thinking_enabled`。若 `update_config` 未被调用就执行 `translate`，`_translate_thread` 第 90 行 `self._base_url` 会 `AttributeError`。虽 `gui_app.py` 启动时必调 `_init_translator`，但防御性不足。`__init__` 初始化为空字符串/默认值
+- **修复**：`_session` 重建丢失配置 — 第 154-158 行 `RequestException` 时重建 session，但只恢复了 `Content-Type` 和 `Authorization`，若 `update_config` 设置了其他自定义头会丢失。且重建在锁外，多线程可能覆盖。改为用 `self._session.close()` + 重建，在锁内执行，保留 headers
+- **优化**：`translator.py` 15 处 logger 用 f-string 改为 `%s` 参数化 — `logger.error(f"...")` 即使日志级别被过滤也会执行字符串格式化。最佳实践是 `logger.error("...: %s", e)` 延迟格式化
+- **重构**：`_translate_thread` callback 调用重复 7 次提取 `_safe_callback` — 每个 except 分支都有 `try: callback(None) except Exception as cb_err: logger.error(...)`，约 4 行重复 7 次 = 28 行重复。提取 `_safe_callback(callback, result)` 公共方法
+- **修复**：`_vtt_timestamp_to_lrc` 进位 bug — `centiseconds = round(millis / 10)` 可能等于 100（如 `millis=999` → 100），原代码 `seconds += (centis % 100) // 100` 错误地始终返回 0，导致秒数不进位。`00:01.999` 错误输出 `[00:01.00]` 而非正确的 `[00:02.00]`。修正为 `seconds += centis // 100; centis = centis % 100`
+- **修复**：`subtitle_converter.py` NOTE 块结束判断不健壮 — 原逻辑：NOTE 块内的行若以制表符或两个空格开头则跳过，否则结束 NOTE 块。但实际 VTT 的 NOTE 块以空行结束，不是靠缩进判断。当前逻辑会把 NOTE 块后的第一行错误地当作 NOTE 内容跳过。改为空行结束 NOTE 块（符合 VTT 规范）
+- **优化**：`text_converter.py` 10 处 logger 用 f-string 改为 `%s` 参数化 — 同 translator.py 优化
+- **修复**：`convert_file_content` 无编码回退 — 第 23 行 `open(file_path, 'r', encoding='utf-8')`，若文件是 Shift-JIS 编码会 `UnicodeDecodeError`。`subtitle_converter.py` 已处理此情况但 `text_converter` 未同步。增加回退编码：UTF-8 失败后尝试 Shift-JIS
+- **优化**：`convert_filename` 重命名失败语义不清 — 第 63 行 `return file_path`（失败）和第 64 行 `return file_path`（无需转换）语义相同，调用方无法区分是否失败。添加注释说明返回值语义，日志带 `[繁简]` 前缀
+- **优化**：`translate` 流程可读性差 — 空文本 callback 后 return，缓存命中后也 return，逻辑正确但可读性差。添加注释说明三个分支（空文本/缓存命中/启动线程）
+
+## v1.57.0
+
+- **修复**：下载层 41 处 `print` 严重违反项目硬约束 — `downloader.py` 18 处、`downloader_direct.py` 8 处、`manager.py` 5 处、`manager_core.py` 10 处。v1.48.0 changelog 声称已全部替换为 `logging`，但下载层是重灾区，PyInstaller 打包后 `print` 刷屏且无级别控制。全部替换为 `logger`（info/warning/exception），与 `manager_poll.py` 已有的正确用法一致
+- **重构**：删除 `_get_aria2_proxy` thread-local 代理，统一用 `_get_global_aria2_proxy` — `WorkDownloader._get_aria2_proxy()` 用 `threading.local` 缓存每线程 ServerProxy，`_get_global_aria2_proxy()` 用全局单例。XML-RPC ServerProxy 本身是线程安全的，无需 thread-local 缓存。`download_file`/`download_file_async` 改用全局代理，消除两种获取方式并存的混乱
+- **修复**：`submit` 重复提交防护缺少 CONVERTING 状态 — 第 80 行检查 `SUBMITTING/DOWNLOADING/QUEUED` 时返回，但 `CONVERTING` 状态未包含。字幕转换期间重复提交会覆盖正在转换的任务。添加 `TaskStatus.CONVERTING` 到检查条件
+- **重构**：`_submit_aria2`/`_submit_direct` 文件存在性检查重复消除 — v1.50.0 changelog 声称已提取 `_check_files_existence` 公共方法，但实际仍是内联重复（约 30 行 × 2）。提取 `_check_files_existence(files, save_dir)` 返回 `(files_to_download, skipped_count)`，两个方法调用
+- **重构**：空文件完成处理重复消除 — v1.50.0 changelog 声称已提取 `_handle_task_completion`，但实际未做。`_submit_aria2`/`_submit_direct` 的 `if not files_to_download:` 块完全相同（约 10 行），提取为 `_handle_task_completion(task)`
+- **重构**：三个 persist 方法结构相同提取 `_safe_persist` — `_persist_task`/`_remove_persisted`/`_sync_task_status` 都是 `if self._pending_db is None: return` + `try: self._pending_db.xxx() except Exception as e: print(...)`。提取 `_safe_persist(action, error_msg, *args)` 公共方法
+- **重构**：`_retry_task`/`_auto_restart_slow_task` 清理逻辑重复消除 — 两者都有"等待旧线程 → 清理 aria2/direct → 重置 task 字段"结构，仅等待超时不同（30s vs 120s）。提取 `_cleanup_and_reset_task(task, thread_join_timeout)` 公共方法
+- **修复**：`downloader.py` `shell=True` 残留 — v1.48.0 changelog 声称已移除 `shell=True`，但 `subprocess.Popen([aria2_exe], ..., shell=True)` 实际仍在。列表参数 + `shell=True` 语义混乱，移除 `shell=True`
+- **删除**：`_download_cover_image`/`_save_tags_file` 无意义 wrapper — 两个方法仅调用 `self.save_cover_image(save_dir)` 和 `self.save_tags(save_dir)`，增加一层无意义间接。删除 wrapper，直接调用
+- **重构**：`save_cover_image` 的 numeric_id 解析用 `strip_rj_prefix` — 第 108 行 `source_id.replace("RJ","").replace("rg","").replace("RG","").lstrip("0")` 与 v1.55.0 抽取的 `strip_rj_prefix` 功能重叠。替换为 `strip_rj_prefix(source_id).lstrip("0")`
+- **清理**：`ensure_aria2_running` 循环变量 `i` 未使用 — `for i in range(20)` 中 `i` 从未使用，改为 `for _ in range(20)`
+- **修复**：`get_remote_file_size` HEAD 失败无回退 — 某些 CDN 对 HEAD 请求返回 405，导致返回 -1 误判文件不完整重新下载。HEAD 失败（405/异常）时回退到 GET stream + 只读 content-length，不下载内容
+- **重构**：429 限流处理重复消除且同步 Retry-After 头 — `download_file` 中两处 `wait_time = retry_wait * (2 ** attempt) + 5` + `print` + `time.sleep` 完全相同，且未读取 `Retry-After` 头（v1.55.0 已在 api_client.py 修复但此处未同步）。提取 `_handle_429(response, attempt, max_retries)` 公共方法，优先读 `Retry-After` 头（上限 60s），回退到指数退避
+
+## v1.56.0
+
+- **重构**：数据库层提取 `BaseDatabaseManager` 基类 — `DatabaseManager`/`DownloadHistoryManager`/`PendingTaskManager` 三个类的 `_connect` contextmanager 完全相同（35 行 × 3 = 105 行重复）：threading.local 连接缓存、300 秒超时重连、WAL + synchronous=NORMAL、try/except rollback+close。新增 `src/database/base.py` 基类包含 `_connect`/`close_all`/`_safe_json_load` 公共方法，三个管理器改为继承，消除最严重的 DRY 违规
+- **修复**：`close_all` 只关闭当前线程连接导致其他线程连接泄漏 — `_local.conn` 是 thread-local 的，`close_all` 只关闭调用者线程的连接。gui_app.py 的 `_on_close` 在主线程调用，但工作线程（轮询/下载/预加载）的连接不会被关闭。基类新增全局连接注册表 `_all_conns`，`_register_conn`/`_unregister_conn` 在 `_connect` 中维护，`close_all` 遍历关闭所有线程连接
+- **删除**：三个数据库类的 `self._lock` 死代码 — `__init__` 都创建 `self._lock = threading.Lock()`，但 `_connect` 和 `close_all` 都只操作 `_local`（thread-local 无需锁）。`_lock` 从未被使用，直接删除
+- **重构**：`_safe_json_load` 默认值逻辑简化 — 原实现 `return default if default is not None else ([] if default == [] else {})` 用 `==` 比较 default 与空列表，写法绕且 `default=None` 时返回 `{}` 不直观。简化为 `return default if default is not None else {}`（default 非 None 时直接返回，已覆盖 [] 和 {}）
+- **修复**：`get_work_detail_cached` 直接用 `json.loads` 而非 `_safe_json_load` — database.py 第 188-189 行 `json.loads(vas_str)` 若 vas_str 是损坏 JSON 会抛异常，未用同类已有的 `_safe_json_load` 保护。改为 `self._safe_json_load(vas_str, [])` 和 `self._safe_json_load(circle_str, {})`，与同类其他方法一致
+- **修复**：`history.py` `add_download` 的 `print` 违反项目硬约束 — 第 135 行 `print(f"添加下载历史失败: {e}")` 应改用 `logger`。改为 `logger.exception("添加下载历史失败")`
+- **修复**：`add_download` 的 `except Exception` 吞掉异常后仍提交 — try 块内 `cursor.execute` 失败后进入 except 打印，但 `conn.commit()` 在 try 块内，失败时不执行。移除 try/except，让异常传播给 `_connect` 的 contextmanager 自动 rollback，调用方能感知失败
+- **修复**：`history.py` tags 用逗号分隔不安全 — `add_download` 第 122 行 `",".join(tags)` 存储，`get_all_downloaded_works_full` 第 176 行 `split(",")` 解析，若标签名含逗号会被错误分割。tags 改用 `json.dumps` 序列化，新增 `_parse_tags` 兼容旧逗号格式（优先尝试 JSON，回退到 split）
+- **修复**：`pending.py` `get_all_pending` 缩进 bug 导致只返回第一条 — 原 `return result` 在 `for` 循环内，循环执行一次就 return，导致 `get_all_pending` 永远只返回最新的一条任务。`return result` 移到循环外，正确返回所有持久化任务
+- **重构**：`cache.py` 提取 `_process_image` 公共方法 — `save_image` 和 `save_thumbnail` 的 RGBA→RGB 转换、mode 检查、JPEG 保存逻辑完全相同（约 30 行），仅 cache_key 和是否缩略不同。提取 `_process_image(img_data)` 返回处理后的 PIL.Image，两个方法复用
+- **修复**：`cache.py` 两处 `print` 违反项目硬约束 — 第 192 行 `print(f"保存图片失败: {e}")` 和第 222 行 `print(f"保存缩略图失败: {e}")` 改为 `logger.exception(...)`
+- **修复**：`_schedule_disk_cleanup` 锁释放逻辑 bug — `acquire(blocking=False)` 成功后启动线程，但 `except` 块释放锁，而 `_cleanup_disk_cache` 在 `finally` 中也会 `release()`。`Thread.__init__` 几乎不会抛异常，`except` 块是死代码且逻辑混乱。移除 try/except，直接启动线程（`_cleanup_disk_cache` 的 finally 保证锁释放）
+- **清理**：`get_stats` 方法内重复 `import os` — cache.py 第 285 行 `import os` 在方法内重复导入，但文件第 1 行已导入。删除方法内的冗余导入
+- **优化**：预加载队列有序化 — `_preload_queue` 原为 `set`，`pop()` 无序弹出，预加载顺序不可控可能先加载远处的图片。改为有序 `list` + 去重 `set`，`preload_thumbnails` 按距离 `current_index` 排序后追加，`_preload_worker` 从头部 `pop(0)`，优先加载当前附近的缩略图
+- **修复**：`clear_memory_cache` 直接操作 LRUCache 内部属性绕过锁保护 — `self.memory_cache.cache.clear()` 直接访问 LRUCache 的内部 OrderedDict，若其他线程同时 `get`/`put` 可能不一致。LRUCache 新增 `clear()` 加锁方法，`clear_memory_cache` 改为调用 `self.memory_cache.clear()`
+
+## v1.55.0
+
+- **修复**：主窗口关闭时资源泄漏 — `WorkApp` 未注册 `WM_DELETE_WINDOW` 关闭协议，关闭窗口后 `_thumb_pool`/`_data_pool` 两个 `ThreadPoolExecutor` 从不 `shutdown`，数据库连接也不释放，进程可能挂起。新增 `_on_close` 方法：注册关闭协议、`shutdown(wait=False)` 两个线程池、调用 `close_all()` 关闭 `db`/`download_history`，最后 `root.destroy()`
+- **重构**：`_normalize_rj_id` 三处重复实现合并 — `gui_app.py`、`history.py`、`gui_download.py` 中完全相同的字符串处理逻辑（`replace("RJ","").replace("rg","").replace("RG","").strip().zfill(6)`）抽取为 `src/utils.py` 的 `normalize_rj_id` 公共函数，三处改为薄包装调用。消除 DRY 违规，后续只需维护一处
+- **修复**：`gui_app.py` 多处 `print` 输出违反项目硬约束 — 图标加载失败、启动恢复异常、加载已下载 ID 失败三处 `print` 全部改用 `logger.warning`/`logger.exception`，并带 `exc_info` 保留堆栈
+- **修复**：`logging.basicConfig(level=logging.DEBUG)` 写在模块顶层导入区 — 生产环境 DEBUG 级别会产生海量日志，且若其他模块先导入 logging 此调用会失效。移入 `if __name__ == "__main__":` 块，级别改为 `INFO`
+- **修复**：启动时序耦合脆弱 — `after(100, self._on_startup_restore)` 与 `after(150, self.load_data_async)` 硬编码时序，恢复持久化任务未完成时网络加载已启动。改为 `_on_startup_restore` 在 `finally` 中回调启动 `load_data_async`，确保恢复完成后再加载数据
+- **修复**：图标加载异常过宽 — `except Exception` 收窄为 `except (OSError, ValueError)`，避免吞掉 `KeyboardInterrupt`/`SystemExit` 等不应捕获的异常
+- **修复**：设置窗口可重复打开导致引用泄漏 — `open_settings` 未做去重，连续点击"设置"会创建多个 `SettingsWindow`，旧窗口引用丢失但未关闭。复用 `open_download_manager` 的 `winfo_exists` 检查模式，已存在则 `lift`+`focus_force`；注册 `WM_DELETE_WINDOW` 清理 `_settings_win` 引用；`_settings_win` 初始化为 `None` 避免 `AttributeError`
+- **重构**：`TaskStatus` 枚举比较替换字符串硬编码 — `gui_app_ui.py` 中 `t.status.value in ("submitting","downloading",...)` 等 4 处字符串比较改为 `t.status in (TaskStatus.SUBMITTING, ...)` 枚举值比较，与 `manager.py`/`manager_poll.py` 等模块一致，避免拼写错误且利于重构
+- **修复**：字幕转换阶段底部进度框误隐藏 — `_refresh_task_display` 的活跃任务过滤未包含 `TaskStatus.CONVERTING`，与 `manager_poll.py:44` 的过滤条件不一致，导致字幕转换期间底部进度框被误判为无活跃任务而隐藏。新增 `CONVERTING` 到过滤条件，并增加"转换中"状态文本显示
+- **修复**：缓存失效标记线程不安全 — `_on_dl_tasks_changed` 中 `self._downloaded_cache_valid = False` 是普通赋值，而同方法内 UI 更新已通过 `after(0)` 调度到主线程。缓存失效标记改为同样用 `root.after(0, lambda: setattr(...))` 调度，保持一致的线程安全策略
+- **重构**：`setup_ui` 拆分为 4 个私有方法 — 原 `setup_ui` 约 130 行同时构建顶部/左侧/右侧/底部 4 个区域 + 详情面板，违反单一职责。拆分为 `_build_top_bar`/`_build_list_area`/`_build_detail_area`/`_build_bottom_bar`，`setup_ui` 只做编排
+- **清理**：`_create_task_slot` 初始化循环简化 — `for i in range(1)` 只执行一次却用循环语法包裹，造成可扩展误导。改为直接调用一次 `_create_task_slot()`
+- **删除**：`switch_tab` 死代码 — `NavigationMixin.switch_tab` 是空 `pass` 实现，全项目无调用，v1.44.0 changelog 声称提取导航公共方法但此方法从未实现或使用。直接删除
+- **修复**：`gui_app_nav.py` 魔法数字未替换为常量 — v1.44.0 changelog 声称已将 `show_downloaded` 魔法数字替换为 `SHOW_ALL`/`HIDE_DOWNLOADED`/`DOWNLOADED_TAB` 常量，但本文件 8 处仍是数字 `1/2/3`，与 `filter_mixin.py`、`search_mixin.py` 等其他文件不一致。导入常量替换全部 8 处
+- **修复**：异常日志级别过低 — `_fetch_from_api`/`_fetch_latest_from_api` 的 `except Exception` 分支用 `logger.debug` 记录错误，DEBUG 级别在生产环境（INFO）下不会输出，导致加载失败问题难以诊断。改为 `logger.exception` 保留完整堆栈
+- **重构**：翻页搜索分支代码重复消除 — `go_to_page`/`prev_page`/`next_page` 中"厂商搜索"和"关键词搜索"分支代码（`_bump_generation`+`show_loading`+新建线程调用 `_search_by_circle_async`/`_search_by_keyword_async`）约 12 行重复 3 次。提取 `_navigate_search(page)` 公共方法，三处统一调用
+- **优化**：无数据时取消弹窗 — `_on_data_loaded` 在作品列表为空时弹 `messagebox.showinfo("提示", "当前页没有数据")`，异步加载回调中弹模态对话框阻塞主线程，且翻到空页频繁弹窗影响体验。改为 `status_label.config(text="当前页没有数据")` 状态栏提示
+- **修复**：切换到下载作品 tab 时 loading 状态未设置 — `_on_tab_changed` 中切换到"下载作品"tab 且有搜索条件时调用 `_search_in_downloaded_works()` 但未设置 `self.loading = True`，与其他加载路径不一致，期间用户可重复触发操作。新增 `loading = True`
+- **修复**：`load_data_async` 闭包竞态 — 内嵌 `load()` 闭包在新线程中直接读写 `self.current_tab`/`self.current_page` 等实例属性，可能被主线程同时修改（如用户快速切换 tab）。虽有 `_nav_generation` 机制保护最终提交，但中间状态读取无保护。改为闭包开始时捕获 `tab_snapshot`/`page_snapshot` 快照变量，闭包内只用快照
+- **删除**：`_on_escape` 死代码且会崩溃 — 从未被绑定到 `<Escape>` 快捷键，且方法体内引用 `search_chips`/`title_label`/`btn_row`/`search_button` 4 个全项目无赋值的属性 + `clear_all_items`/`refresh_works` 2 个全项目无定义的方法，若被调用会立即 `AttributeError` 崩溃。直接删除
+- **删除**：5 个 `_shortcut_*` 死代码方法 — `_shortcut_prev`/`_shortcut_next`/`_shortcut_download`/`_shortcut_select_prev`/`_shortcut_select_next` 从未被绑定到任何快捷键，`_bind_shortcuts` 只绑了鼠标滚轮和窗口 resize。约 35 行死代码直接删除
+- **删除**：`_on_root_resize` 与 list_mixin.py 重复定义 — `EventMixin._on_root_resize` 与 `ListMixin._on_root_resize` 完全相同（都调用 `_schedule_canvas_configure()`），MRO 中 `ListMixin` 在前覆盖 `EventMixin` 版本，`EventMixin` 版本永远不会被调用。删除 `EventMixin` 版本，绑定由 `ListMixin` 接管
+- **重构**：`_restore_search_state` keyword/circle 分支代码重复消除 — 两个分支约 12 行结构几乎完全相同（清空其他查询条件 → 设置 page → 更新显示 → `loading=True` → `show_loading` → 新建线程调用 async 方法），仅方法名和状态文本不同。提取 `_restore_async_search(search_type, status_text, update_display, async_method)` 公共方法
+- **优化**：`search_history` 列表添加长度上限 — `_push_search_history` 虽截断当前索引之后的历史，但用户持续做新搜索（不回退）时列表会无限增长。新增 `_MAX_SEARCH_HISTORY = 50` 类常量，超限时删除最旧条目并调整索引
+- **修复**：`_InFlight.dedup` 并发去重竞态 — 用 `if 'evt' in dir()` 检测局部变量是否已赋值，写法极其非惯用且脆弱：`dir()` 返回当前作用域名称列表，语义本应是"evt 是否已赋值"；第 62-63 行在 `with self._lock` 块内检查 `key in self._inflight` 并取出 `evt`，但第 64 行 `if 'evt' in dir()` 在锁外执行——若两个线程同时进入，线程 A 创建 evt 后线程 B 的 `evt` 可能未赋值就到了第 64 行检查，`dir()` 不含 `evt` 导致 B 误走"新建 fetcher"分支，破坏去重语义。重构为局部变量 `existing` 接收 evt，锁外用 `if existing is not None` 判断；首个调用者执行 fetcher，等待者复用结果/异常
+- **修复**：`_fetch_or_dedup` 失败时重复请求 — 流程：① 先查缓存（miss）→ ② `_inflight.dedup` 调 fetcher（fetcher 内部 `_cache.put`）→ ③ `_cache.get` 取结果。但 `dedup` 用 `try/except: pass` 吞掉 fetcher 异常（第 89-90 行），若 fetcher 抛异常，`_cache.get` 返回 `None`，第 93 行又调一次 `fetcher()`——同一个失败请求被调用两次，且第二次调用结果不缓存也不去重，完全绕过保护。移除 `try/except: pass` 吞异常，让异常透传给所有等待者；移除 fallback 二次调用 fetcher
+- **重构**：`fetch_works_page`/`fetch_latest_works_page` 函数体完全相同 — 两者 URL、params、响应解析逻辑一字不差，仅 cache_key 前缀不同（`"works"` vs `"latest"`），约 25 行重复代码。提取 `_fetch_works_page_impl(key_prefix, page, page_size)` 公共实现，两函数改为薄包装
+- **重构**：`search_by_tag`/`search_by_keyword`/`search_by_circle` 响应解析逻辑完全相同 — 三者的 `if data is None ... elif isinstance(data, dict) and "works" in data ...` 链完全一致，约 25 行重复 3 次。提取 `_parse_search_response(data, page, page_size)` 解析函数 + `_search_impl(key, encoded_query, page, page_size)` 请求实现，三个函数改为薄包装（消除约 75 行重复）
+- **重构**：`fetch_work_detail`/`fetch_tracks` RJ ID 规范化重复 — 两处 `if str(rid).startswith("RJ"): rid = str(rid)[2:]; rid = str(int(rid))` 完全相同，且与 `src/utils.py` 的 `normalize_rj_id` 功能重叠（v1.55.0 已抽取）。但 `normalize_rj_id` 返回零填充字符串，这里需要纯数字。新增 `strip_rj_prefix(rj_id)` 到 `utils.py` 返回纯数字字符串，两处调用替换内联逻辑
+- **优化**：429 限流响应读取 `Retry-After` 头 — 硬编码 `RETRY_DELAY * (2 ** attempt)` 指数退避，但 HTTP 429 标准的 `Retry-After` 头可能指定精确等待时间。忽略它可能等待过短（立即再被限流）或过长（不必要延迟）。改为优先读取 `Retry-After` 头解析为秒数（上限 60s），回退到指数退避
+- **优化**：`APIClient` 支持依赖注入 — 模块级 `_session`/`_cache`/`_inflight` 全局单例在模块加载时创建，测试时无法替换 mock。`APIClient.__init__` 新增可选 `session`/`cache` 参数，默认使用模块级单例，便于未来测试
+- **修复**：`config.py` `VERSION` 未同步 — CHANGELOG 和 README 已升到 v1.55.0，但 `config.py` 的 `VERSION` 仍是 `"v1.54.0"`。`gui_app.py` 用它设置窗口标题 `f"音声浏览下载 {VERSION}"`，用户看到的版本号错误。改为 `"v1.55.0"`
+- **删除**：`_friendly_error` 死代码 — 定义在 config.py 第 111 行，全项目无调用。这是一个 UI 辅助函数（将技术错误转为友好提示），放在 config.py 中职责不清且从未被使用。直接删除（16 行）
+- **修复**：`SUBTITLE_CONVERT_ENABLED` 默认值矛盾 — `_DEFAULT_CONFIG` 第 35 行设为 `False`，但第 106 行 `_cfg.get("subtitle_convert_enabled", True)` 的 fallback 是 `True`。虽然第 66-68 行的合并逻辑确保 key 一定在 `_cfg` 中（值为 False），fallback 永不触发，但这是混淆点。改为 `_cfg["subtitle_convert_enabled"]` 直接索引
+- **修复**：配置文件解析错误静默吞掉 — `except Exception:` 静默回退到空字典，配置文件损坏（JSON 语法错误）或权限不足时用户不知道配置丢失，所有自定义设置突然消失。拆分为 `except FileNotFoundError:`（首次运行，静默）+ `except Exception as e:`（记录 `warning` 日志）
+- **重构**：16 处冗余 `.get(key, default)` 统一为 `_cfg[key]` 直接索引 — 第 66-68 行合并逻辑已确保所有 `_DEFAULT_CONFIG` 的 key 都在 `_cfg` 中且非 None，所以第 91-108 行的 `.get(key, default)` fallback 永远不会触发。而第 70-73 行的 `API_URL`/`ARIA2_RPC_URL` 等用 `_cfg[key]` 直接索引。风格不一致，全部统一为直接索引
+
 ## v1.54.0
 
 - **修复**：下载任务进行中时打开新作品下载窗口卡顿约 20 秒 — `fetch_tracks` 是唯一未走缓存/去重路径的 API 函数，每次打开下载窗口都重新请求网络；当已有下载任务占满带宽时，请求超时（15s）+ 重试退避累计约 20s。改为走 `_fetch_or_dedup`，与 `fetch_work_detail` 等其他 API 函数一致，重复打开同一作品秒开（120s LRU 缓存 + 并发去重）

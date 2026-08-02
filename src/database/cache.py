@@ -77,6 +77,15 @@ class LRUCache:
             finally:
                 self.lock.release()
 
+    def clear(self):
+        """加锁清空缓存，避免 clear_memory_cache 直接操作内部 OrderedDict 绕过锁保护"""
+        acquired = self.lock.acquire(timeout=0.05)
+        if acquired:
+            try:
+                self.cache.clear()
+            finally:
+                self.lock.release()
+
     def get_stats(self):
         total = self._stats["hits"] + self._stats["misses"] + self._stats["skips"]
         if total == 0:
@@ -103,7 +112,8 @@ class ImageCacheManager:
         self._thumbnail_size = (180, 180)
         self.max_disk_bytes = max_disk_mb * 1024 * 1024
         self._cleanup_lock = threading.Lock()
-        self._preload_queue = set()  # 预加载队列
+        self._preload_queue = []     # 有序预加载队列（按距离当前位置排序）
+        self._preload_set = set()    # 去重辅助集合
         self._preloading = False    # 预加载进行中标志
 
     def _get_cache_path(self, url):
@@ -166,22 +176,29 @@ class ImageCacheManager:
         logger.debug("get_thumbnail 磁盘无缓存")
         return None
 
+    def _process_image(self, img_data):
+        """将 bytes 或 PIL.Image 转换为 RGB 模式的 PIL.Image（处理 RGBA 透明通道）。
+
+        save_image 和 save_thumbnail 共用的图像预处理逻辑。
+        """
+        import io
+        if isinstance(img_data, bytes):
+            img = Image.open(io.BytesIO(img_data))
+        else:
+            img = img_data
+
+        if img.mode == 'RGBA':
+            bg = Image.new('RGB', img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[3])
+            img = bg
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        return img
+
     def save_image(self, url, img_data):
         cache_path = self._get_cache_path(url)
         try:
-            if isinstance(img_data, bytes):
-                import io
-                img = Image.open(io.BytesIO(img_data))
-            else:
-                img = img_data
-
-            if img.mode == 'RGBA':
-                bg = Image.new('RGB', img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[3])
-                img = bg
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-
+            img = self._process_image(img_data)
             img.save(cache_path, 'JPEG', quality=85, optimize=True)
 
             photo = ImageTk.PhotoImage(img)
@@ -189,25 +206,14 @@ class ImageCacheManager:
             self._schedule_disk_cleanup()
             return photo
         except Exception as e:
-            print(f"保存图片失败: {e}")
+            logger.exception("保存图片失败")
             return None
 
     def save_thumbnail(self, url, img_data):
         cache_key = f"thumb_{url}"
         cache_path = self._get_cache_path(url)
         try:
-            if isinstance(img_data, bytes):
-                import io
-                img = Image.open(io.BytesIO(img_data))
-            else:
-                img = img_data
-
-            if img.mode == 'RGBA':
-                bg = Image.new('RGB', img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[3])
-                img = bg
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
+            img = self._process_image(img_data)
 
             if not os.path.exists(cache_path):
                 img.save(cache_path, 'JPEG', quality=85, optimize=True)
@@ -219,7 +225,7 @@ class ImageCacheManager:
             self._schedule_disk_cleanup()
             return photo
         except Exception as e:
-            print(f"保存缩略图失败: {e}")
+            logger.exception("保存缩略图失败")
             return None
 
     def load_from_url(self, url, size=None):
@@ -278,11 +284,10 @@ class ImageCacheManager:
         return os.path.exists(cache_path)
 
     def clear_memory_cache(self):
-        self.memory_cache.cache.clear()
+        self.memory_cache.clear()
         self.memory_cache.clear_stats()
 
     def get_stats(self):
-        import os
         disk_size = 0
         if os.path.exists(self.cache_dir):
             for f in os.listdir(self.cache_dir):
@@ -300,7 +305,7 @@ class ImageCacheManager:
         }
 
     def preload_thumbnails(self, urls, current_index=0):
-        """智能预加载缩略图（前后各3张）"""
+        """智能预加载缩略图（前后各3张，按距离当前位置排序）"""
         if not urls or self._preloading:
             return
 
@@ -309,10 +314,19 @@ class ImageCacheManager:
         start = max(0, current_index - preload_range)
         end = min(len(urls), current_index + preload_range + 1)
 
-        urls_to_preload = [u for u in urls[start:end] if u]
-        self._preload_queue.update(urls_to_preload)
+        # 按距离当前位置排序，优先加载最近的
+        urls_to_preload = []
+        for i in range(start, end):
+            u = urls[i]
+            if u and u not in self._preload_set:
+                urls_to_preload.append(u)
+                self._preload_set.add(u)
 
-        if not self._preloading:
+        # 按距离排序后追加到队列
+        urls_to_preload.sort(key=lambda u: abs(urls.index(u) - current_index))
+        self._preload_queue.extend(urls_to_preload)
+
+        if not self._preloading and self._preload_queue:
             self._preloading = True
             threading.Thread(target=self._preload_worker, daemon=True).start()
 
@@ -320,7 +334,8 @@ class ImageCacheManager:
         """后台预加载工作线程"""
         try:
             while self._preload_queue:
-                url = self._preload_queue.pop()
+                url = self._preload_queue.pop(0)
+                self._preload_set.discard(url)
                 if not url:
                     continue
 
@@ -338,11 +353,10 @@ class ImageCacheManager:
             self._preloading = False
 
     def _schedule_disk_cleanup(self):
+        # acquire 成功后启动清理线程，_cleanup_disk_cache 的 finally 负责释放锁
+        # Thread 启动几乎不会失败，无需 try/except
         if self._cleanup_lock.acquire(blocking=False):
-            try:
-                threading.Thread(target=self._cleanup_disk_cache, daemon=True).start()
-            except Exception:
-                self._cleanup_lock.release()
+            threading.Thread(target=self._cleanup_disk_cache, daemon=True).start()
 
     def _cleanup_disk_cache(self):
         try:

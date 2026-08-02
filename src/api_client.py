@@ -3,6 +3,8 @@ import time
 import threading
 from collections import OrderedDict
 
+from src.utils import strip_rj_prefix
+
 
 class _APICache:
     def __init__(self, max_size=50, ttl=300):
@@ -52,25 +54,43 @@ _cache = _APICache(max_size=100, ttl=120)
 class _InFlight:
     def __init__(self):
         self._inflight = {}
-        self._results = {}
         self._lock = threading.Lock()
 
     def dedup(self, key, fetcher):
+        """去重并发请求。第一个调用者执行 fetcher，后续调用者等待结果。
+
+        Returns:
+            fetcher 的返回值（所有等待者获得相同结果）
+        Raises:
+            透传 fetcher 抛出的异常（所有等待者获得相同异常）
+        """
         with self._lock:
-            if key in self._results:
-                return True
-            if key in self._inflight:
-                evt = self._inflight[key]
-        if 'evt' in dir():
+            existing = self._inflight.get(key)
+            if existing is not None:
+                # 已有在途请求，等待其完成
+                evt, result_holder, error_holder = existing
+            else:
+                # 首个调用者：注册 Event 并负责执行 fetcher
+                evt = threading.Event()
+                result_holder = {}
+                error_holder = {}
+                self._inflight[key] = (evt, result_holder, error_holder)
+
+        if existing is not None:
+            # 等待者：阻塞至首个调用者完成，复用其结果或异常
             evt.wait()
-            return True
-        with self._lock:
-            evt = threading.Event()
-            self._inflight[key] = evt
+            if error_holder:
+                raise error_holder["error"]
+            return result_holder.get("result")
+
+        # 首个调用者：执行 fetcher 并通知所有等待者
         try:
             result = fetcher()
-            with self._lock:
-                self._results[key] = result
+            result_holder["result"] = result
+            return result
+        except Exception as e:
+            error_holder["error"] = e
+            raise
         finally:
             evt.set()
             with self._lock:
@@ -84,13 +104,12 @@ def _fetch_or_dedup(key, fetcher):
     cached = _cache.get(key)
     if cached is not None:
         return cached
-    try:
-        _inflight.dedup(key, fetcher)
-    except Exception:
-        pass
-    result = _cache.get(key)
-    if result is None:
-        result = fetcher()
+    result = _inflight.dedup(key, fetcher)
+    # fetcher 成功时已通过 _cache.put 缓存结果，这里取缓存保持返回值一致
+    if result is not None:
+        cached_result = _cache.get(key)
+        if cached_result is not None:
+            return cached_result
     return result
 
 
@@ -103,7 +122,15 @@ def _request_with_retry(method, url, max_retries=MAX_RETRIES, **kwargs):
             if response.status_code == 404:
                 return None
             if response.status_code == 429:
-                wait = RETRY_DELAY * (2 ** attempt)
+                # 优先读取 Retry-After 头，回退到指数退避
+                retry_after = response.headers.get("Retry-After")
+                if retry_after is not None:
+                    try:
+                        wait = min(float(retry_after), 60)
+                    except ValueError:
+                        wait = RETRY_DELAY * (2 ** attempt)
+                else:
+                    wait = RETRY_DELAY * (2 ** attempt)
                 time.sleep(wait)
                 continue
             response.raise_for_status()
@@ -120,8 +147,9 @@ def _cache_key(*args):
     return "|".join(str(a) for a in args)
 
 
-def fetch_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
-    key = _cache_key("works", page, page_size)
+def _fetch_works_page_impl(key_prefix, page, page_size):
+    """推荐作品 / 最新收录 共用的作品列表获取实现（两者请求 URL 和参数完全相同）。"""
+    key = _cache_key(key_prefix, page, page_size)
 
     def do_fetch():
         url = f"{API_BASE_URL}/works"
@@ -146,44 +174,21 @@ def fetch_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
         return result
 
     return _fetch_or_dedup(key, do_fetch)
+
+
+def fetch_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
+    return _fetch_works_page_impl("works", page, page_size)
 
 
 def fetch_latest_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
-    key = _cache_key("latest", page, page_size)
-
-    def do_fetch():
-        url = f"{API_BASE_URL}/works"
-        params = {
-            "page": page,
-            "pageSize": page_size,
-            "subtitle": "0"
-        }
-        data = _request_with_retry("GET", url, params=params)
-        if data is None:
-            result = ([], 1)
-        elif isinstance(data, list):
-            works = data
-            max_page = page + 1 if len(works) >= page_size else page
-            result = (works, max_page)
-        else:
-            works = data.get("works", data.get("list", []))
-            total = data.get("total", 0)
-            max_page = max(1, (total + page_size - 1) // page_size) if total else page + 1
-            result = (works, max_page)
-        _cache.put(key, result)
-        return result
-
-    return _fetch_or_dedup(key, do_fetch)
+    return _fetch_works_page_impl("latest", page, page_size)
 
 
 def fetch_work_detail(rj_id):
     key = _cache_key("detail", rj_id)
 
     def do_fetch():
-        rid = rj_id
-        if str(rid).startswith("RJ"):
-            rid = str(rid)[2:]
-        rid = str(int(rid))
+        rid = strip_rj_prefix(rj_id)
         url = f"{API_BASE_URL}/workInfo/{rid}"
         params = {"v": "2"}
         data = _request_with_retry("GET", url, params=params)
@@ -198,10 +203,7 @@ def fetch_tracks(rj_id):
     key = _cache_key("tracks", rj_id)
 
     def do_fetch():
-        rid = rj_id
-        if str(rid).startswith("RJ"):
-            rid = str(rid)[2:]
-        rid = str(int(rid))
+        rid = strip_rj_prefix(rj_id)
         url = f"{API_BASE_URL}/tracks/{rid}"
         params = {"v": "2"}
         data = _request_with_retry("GET", url, params=params)
@@ -215,95 +217,55 @@ def fetch_tracks(rj_id):
 def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE):
     encoded_tag = _encode_tags(tags)
     key = _cache_key("tag", encoded_tag, page, page_size)
-
-    def do_fetch():
-        url = f"{API_BASE_URL}/search/{encoded_tag}"
-        params = {
-            "page": page,
-            "pageSize": page_size,
-            "subtitle": "0",
-            "djin": "false"
-        }
-        data = _request_with_retry("GET", url, params=params)
-        if data is None:
-            result = ([], 1)
-        elif isinstance(data, dict) and "works" in data:
-            works = data.get("works", [])
-            total = data.get("total", 0)
-            max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            result = (works, max_page)
-        elif isinstance(data, dict) and "data" in data:
-            inner = data["data"]
-            if isinstance(inner, dict) and "works" in inner:
-                works = inner.get("works", [])
-                total = inner.get("total", 0)
-                max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            elif isinstance(inner, list):
-                works = inner
-                max_page = page + 1 if len(works) >= page_size else page
-            else:
-                works = []
-                max_page = 1
-            result = (works, max_page)
-        elif isinstance(data, list):
-            result = (data, page + 1 if len(data) >= page_size else page)
-        else:
-            result = ([], 1)
-        _cache.put(key, result)
-        return result
-
-    return _fetch_or_dedup(key, do_fetch)
+    return _search_impl(key, encoded_tag, page, page_size)
 
 
 def search_by_keyword(keyword, page: int = 1, page_size: int = WORKS_PER_PAGE):
     encoded_keyword = requests.utils.quote(keyword)
     key = _cache_key("keyword", encoded_keyword, page, page_size)
-
-    def do_fetch():
-        url = f"{API_BASE_URL}/search/{encoded_keyword}"
-        params = {
-            "page": page,
-            "pageSize": page_size,
-            "subtitle": "0",
-            "djin": "false"
-        }
-        data = _request_with_retry("GET", url, params=params)
-        if data is None:
-            result = ([], 1)
-        elif isinstance(data, dict) and "works" in data:
-            works = data.get("works", [])
-            total = data.get("total", 0)
-            max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            result = (works, max_page)
-        elif isinstance(data, dict) and "data" in data:
-            inner = data["data"]
-            if isinstance(inner, dict) and "works" in inner:
-                works = inner.get("works", [])
-                total = inner.get("total", 0)
-                max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            elif isinstance(inner, list):
-                works = inner
-                max_page = page + 1 if len(works) >= page_size else page
-            else:
-                works = []
-                max_page = 1
-            result = (works, max_page)
-        elif isinstance(data, list):
-            result = (data, page + 1 if len(data) >= page_size else page)
-        else:
-            result = ([], 1)
-        _cache.put(key, result)
-        return result
-
-    return _fetch_or_dedup(key, do_fetch)
+    return _search_impl(key, encoded_keyword, page, page_size)
 
 
 def search_by_circle(circle_name, page: int = 1, page_size: int = WORKS_PER_PAGE):
+    encoded_name = requests.utils.quote(f"$circle:{circle_name}$")
     key = _cache_key("circle", circle_name, page, page_size)
+    return _search_impl(key, encoded_name, page, page_size)
 
+
+def _parse_search_response(data, page, page_size):
+    """解析搜索 API 响应为 (works, max_page) 元组。
+
+    兼容多种响应格式：None / list / {"works":...} / {"data":{"works":...}} / {"data":[...]}。
+    """
+    if data is None:
+        return ([], 1)
+    if isinstance(data, dict) and "works" in data:
+        works = data.get("works", [])
+        total = data.get("total", 0)
+        max_page = max(1, (total + page_size - 1) // page_size) if total else 1
+        return (works, max_page)
+    if isinstance(data, dict) and "data" in data:
+        inner = data["data"]
+        if isinstance(inner, dict) and "works" in inner:
+            works = inner.get("works", [])
+            total = inner.get("total", 0)
+            max_page = max(1, (total + page_size - 1) // page_size) if total else 1
+        elif isinstance(inner, list):
+            works = inner
+            max_page = page + 1 if len(works) >= page_size else page
+        else:
+            works = []
+            max_page = 1
+        return (works, max_page)
+    if isinstance(data, list):
+        return (data, page + 1 if len(data) >= page_size else page)
+    return ([], 1)
+
+
+def _search_impl(key, encoded_query, page, page_size):
+    """tag/keyword/circle 三种搜索共用的请求实现。"""
     def do_fetch():
-        encoded_name = requests.utils.quote(f"$circle:{circle_name}$")
-        url = f"{API_BASE_URL}/search/{encoded_name}"
+        url = f"{API_BASE_URL}/search/{encoded_query}"
         params = {
             "page": page,
             "pageSize": page_size,
@@ -311,30 +273,7 @@ def search_by_circle(circle_name, page: int = 1, page_size: int = WORKS_PER_PAGE
             "djin": "false"
         }
         data = _request_with_retry("GET", url, params=params)
-        if data is None:
-            result = ([], 1)
-        elif isinstance(data, dict) and "works" in data:
-            works = data.get("works", [])
-            total = data.get("total", 0)
-            max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            result = (works, max_page)
-        elif isinstance(data, dict) and "data" in data:
-            inner = data["data"]
-            if isinstance(inner, dict) and "works" in inner:
-                works = inner.get("works", [])
-                total = inner.get("total", 0)
-                max_page = max(1, (total + page_size - 1) // page_size) if total else 1
-            elif isinstance(inner, list):
-                works = inner
-                max_page = page + 1 if len(works) >= page_size else page
-            else:
-                works = []
-                max_page = 1
-            result = (works, max_page)
-        elif isinstance(data, list):
-            result = (data, page + 1 if len(data) >= page_size else page)
-        else:
-            result = ([], 1)
+        result = _parse_search_response(data, page, page_size)
         _cache.put(key, result)
         return result
 
@@ -352,6 +291,15 @@ def clear_api_cache():
 
 
 class APIClient:
+    """API 客户端薄封装。所有方法委托到模块级函数，共享全局 session/缓存/去重。
+
+    可选注入 session 和 cache 以便测试替换；默认使用模块级单例。
+    """
+
+    def __init__(self, session=None, cache=None):
+        self._session = session if session is not None else _session
+        self._cache = cache if cache is not None else _cache
+
     def fetch_works_page(self, page, page_size=WORKS_PER_PAGE):
         return fetch_works_page(page, page_size)
 

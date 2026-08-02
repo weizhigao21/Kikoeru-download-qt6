@@ -1,53 +1,13 @@
 import sqlite3
 import json
-import threading
-import time
-from contextlib import contextmanager
 
-_CONNECTION_TIMEOUT = 300
+from .base import BaseDatabaseManager
 
 
-class PendingTaskManager:
+class PendingTaskManager(BaseDatabaseManager):
+    # 需要持久化的任务状态（与 TaskStatus 枚举值保持一致）
+    # TaskStatus.SUBMITTING / DOWNLOADING / QUEUED / FAILED
     _PERSISTED_STATUSES = ("submitting", "downloading", "queued", "failed")
-
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self._local = threading.local()
-        self._lock = threading.Lock()
-        self._init_db()
-
-    @contextmanager
-    def _connect(self):
-        conn = getattr(self._local, 'conn', None)
-        last_used = getattr(self._local, 'last_used', 0)
-
-        if conn is None or (time.time() - last_used > _CONNECTION_TIMEOUT):
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            self._local.conn = conn
-
-        self._local.last_used = time.time()
-
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            try:
-                conn.close()
-            except Exception:
-                pass
-            self._local.conn = None
-            raise
 
     def _init_db(self):
         with self._connect() as conn:

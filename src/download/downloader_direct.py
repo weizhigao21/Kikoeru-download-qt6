@@ -1,9 +1,11 @@
 import os
 import threading
 import time
+import logging
 import requests
 from ..database.cache import get_http_session
 
+logger = logging.getLogger(__name__)
 
 _download_progress = {}
 _progress_lock = threading.Lock()
@@ -21,10 +23,24 @@ def _set_progress(task_id, **kwargs):
 
 
 def get_remote_file_size(url):
+    """获取远程文件大小，HEAD 失败时回退到 GET stream。
+
+    某些 CDN 对 HEAD 请求返回 405，导致返回 -1 误判文件不完整重新下载。
+    """
+    session = get_http_session()
     try:
-        session = get_http_session()
         response = session.head(url, timeout=10, allow_redirects=True)
+        if response.status_code == 200:
+            content_length = response.headers.get('content-length')
+            if content_length:
+                return int(content_length)
+    except Exception:
+        pass
+    # HEAD 失败（405 或异常）时回退到 GET stream，只读 content-length 不下载内容
+    try:
+        response = session.get(url, stream=True, timeout=10, allow_redirects=True)
         content_length = response.headers.get('content-length')
+        response.close()
         if content_length:
             return int(content_length)
     except Exception:
@@ -35,17 +51,38 @@ def get_remote_file_size(url):
 def check_file_exists(filepath, url=None):
     if not os.path.exists(filepath):
         return False, 0
-    
+
     local_size = os.path.getsize(filepath)
     if local_size == 0:
         return False, 0
-    
+
     if url:
         remote_size = get_remote_file_size(url)
         if remote_size > 0:
             return local_size == remote_size, local_size
-    
+
     return local_size > 0, local_size
+
+
+def _handle_429(response, attempt, max_retries):
+    """处理 429 限流响应，优先读取 Retry-After 头，回退到指数退避。
+
+    返回等待秒数（0 表示不等待）。
+    """
+    # 优先读取 Retry-After 头（v1.55.0 已在 api_client.py 修复，此处同步）
+    retry_after = response.headers.get('Retry-After')
+    if retry_after:
+        try:
+            wait_time = min(int(retry_after), 60)
+            logger.warning("[直接下载] 429 限流，Retry-After=%ss，等待 %ss 后重试 (%d/%d)",
+                           retry_after, wait_time, attempt + 1, max_retries)
+            return wait_time
+        except (ValueError, TypeError):
+            pass
+    # 回退到指数退避
+    wait_time = 3 * (2 ** attempt) + 5
+    logger.warning("[直接下载] 429 限流，等待 %ss 后重试 (%d/%d)", wait_time, attempt + 1, max_retries)
+    return wait_time
 
 
 class DirectDownloader:
@@ -67,7 +104,7 @@ class DirectDownloader:
                             "speed": 0,
                             "status": "complete"
                         }
-                print(f"[直接下载] 文件已完整，跳过: {filename}")
+                logger.info("[直接下载] 文件已完整，跳过: %s", filename)
                 return True
 
         if task_id:
@@ -100,7 +137,7 @@ class DirectDownloader:
                         response = session.get(url, stream=True, timeout=30, headers=headers)
 
                         if response.status_code == 416:
-                            print(f"[直接下载] 文件已完整(416)，跳过: {filename}")
+                            logger.info("[直接下载] 文件已完整(416)，跳过: %s", filename)
                             remote_size = get_remote_file_size(url)
                             final_size = remote_size if remote_size > 0 else local_offset
                             _set_progress(task_id, total=final_size, completed=final_size, status="complete", speed=0)
@@ -117,9 +154,10 @@ class DirectDownloader:
                                     pass
                             if total_from_header == 0:
                                 total_from_header = get_remote_file_size(url)
-                            print(f"[直接下载] 断点续传: {filename} ({local_offset}/{total_from_header})")
+                            logger.info("[直接下载] 断点续传: %s (%d/%d)", filename, local_offset, total_from_header)
                         else:
-                            print(f"[直接下载] 服务端不支持Range({response.status_code})，从头重新下载: {filename}")
+                            logger.info("[直接下载] 服务端不支持Range(%s)，从头重新下载: %s",
+                                        response.status_code, filename)
                             response.close()
                             response = session.get(url, stream=True, timeout=30)
                     else:
@@ -128,8 +166,7 @@ class DirectDownloader:
                     response = session.get(url, stream=True, timeout=30)
 
                 if response.status_code == 429:
-                    wait_time = retry_wait * (2 ** attempt) + 5
-                    print(f"[直接下载] 429 限流，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
+                    wait_time = _handle_429(response, attempt, max_retries)
                     time.sleep(wait_time)
                     continue
 
@@ -180,17 +217,16 @@ class DirectDownloader:
                 return True
 
             except requests.exceptions.HTTPError as e:
-                if hasattr(e, 'response') and e.response.status_code == 429:
-                    wait_time = retry_wait * (2 ** attempt) + 5
-                    print(f"[直接下载] 429 限流，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
+                    wait_time = _handle_429(e.response, attempt, max_retries)
                     time.sleep(wait_time)
                     continue
-                print(f"[直接下载] 失败: {filename} - {e}")
+                logger.warning("[直接下载] 失败: %s - %s", filename, e)
                 _set_progress(task_id, status="error")
                 return False
 
             except Exception as e:
-                print(f"[直接下载] 失败: {filename} - {e}")
+                logger.warning("[直接下载] 失败: %s - %s", filename, e)
                 if attempt < max_retries - 1:
                     time.sleep(retry_wait)
                     continue
@@ -247,3 +283,4 @@ def poll_direct_progress(task_ids):
 
     all_resolved = (unresolved == 0)
     return total, completed, speed, has_error, error_count, all_resolved
+
