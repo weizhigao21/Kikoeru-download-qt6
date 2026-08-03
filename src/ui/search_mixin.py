@@ -374,6 +374,10 @@ class SearchMixin:
             if getattr(self, '_nav_generation', 0) != gen:
                 self.root.after(0, self._safe_reset_loading)
                 return
+            if not work_data:
+                # API 404/无结果时返回 None，直接回调会让 _on_search_success 崩溃
+                self.root.after(0, self._on_search_error, f"未找到 RJ{numeric_id} 的作品")
+                return
             self.root.after(0, self._on_search_success, work_data)
         except Exception as e:
             if getattr(self, '_nav_generation', 0) != gen:

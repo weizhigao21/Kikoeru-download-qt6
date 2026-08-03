@@ -1,3 +1,7 @@
+## v1.60.2
+
+- **修复**：搜索不存在的 RJ ID 时 `_on_search_success` 崩溃 `AttributeError: 'NoneType' object has no attribute 'get'` — 搜索不存在/API 404 时 `fetch_work_detail`（`api_client.py:187`）返回 `None` 而不抛异常（404 是正常 HTTP 响应，不算请求失败），`_search_by_id_async`（`search_mixin.py:373`）未判空，把 `None` 经 `after(0, _on_search_success, None)` 传给回调，`work_data.get("source_id")` 对 `None` 调用崩溃。修复：`_search_by_id_async` 异步边界加 `not work_data` 检查，`None`/空 dict 路由到 `_on_search_error` 弹出"未找到 RJ{id} 的作品"提示。覆盖普通 ID 搜索（`search_mixin.py:170`）与版本 ID 搜索（`search_mixin.py:368`）两条路径（`_on_search_success` 全项目唯一调用方）
+
 ## v1.60.1
 
 - **修复**：下载窗口树刷新竞态导致 `TclError: Item not found` 连环报错 — 点"刷新"或重新加载时 `display_tree` 执行 `tree.delete` 清空整棵树重建，旧 item id（如 I005）全部失效，但 `_prev_selection` 未随之重置。下次 `<<TreeviewSelect>>` 事件触发 `on_select` 时 `newly_deselected` 混入失效 id，`get_children(item_id)` 抛 `TclError`；且异常发生在循环中途，`_prev_selection` 更新行永远执行不到，失效 id 持续残留，导致每次点击都重复报错。修复：①`display_tree`（`gui_download.py:145`）重建前重置 `_prev_selection` 并清空 `download_tasks`/`item_folder_path` 旧映射（避免多次刷新累积旧 id）；②`on_select` 循环加 `self.tree.exists(item_id)` 防御，失效 id 直接跳过，保证 `_prev_selection` 总能正常更新
