@@ -161,6 +161,25 @@ class DatabaseManager(BaseDatabaseManager):
                 return row[0]
             return ""
 
+    def get_translated_titles(self, work_ids) -> dict:
+        """批量查询翻译标题，一次 SQL 返回 {work_id: translated_title}。
+
+        避免翻页时每张卡片单独执行一次 get_translated_title 的 UI 线程阻塞。
+        """
+        ids = [str(w) for w in work_ids if str(w)]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT work_id, translated_title FROM translations "
+                f"WHERE work_id IN ({placeholders})",
+                ids,
+            )
+            rows = cursor.fetchall()
+        return {r[0]: r[1] for r in rows if r[0] and r[1]}
+
     def save_translated_title(self, work_id: str, translated_title: str):
         with self._connect() as conn:
             cursor = conn.cursor()

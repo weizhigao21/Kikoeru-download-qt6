@@ -24,23 +24,6 @@ _DEFAULT_COLORS = {
 }
 
 
-def _hover_children(widget, from_bg, to_bg):
-    try:
-        wtype = widget.winfo_class()
-    except Exception:
-        return
-    if wtype in ("Button", "Canvas"):
-        return
-    if wtype in ("Frame", "Label"):
-        try:
-            if widget.cget("bg") == from_bg:
-                widget.config(bg=to_bg)
-        except Exception:
-            pass
-    for child in widget.winfo_children():
-        _hover_children(child, from_bg, to_bg)
-
-
 class ListCardMixin:
     def _create_slot(self):
         colors = getattr(self, 'COLORS', _DEFAULT_COLORS)
@@ -49,12 +32,8 @@ class ListCardMixin:
 
         def _on_enter(e, f=frame, c=colors):
             f.config(bg=c["primary_light"])
-            for child in f.winfo_children():
-                _hover_children(child, c["card_bg"], c["primary_light"])
         def _on_leave(e, f=frame, c=colors):
             f.config(bg=c["card_bg"])
-            for child in f.winfo_children():
-                _hover_children(child, c["primary_light"], c["card_bg"])
         frame.bind("<Enter>", _on_enter)
         frame.bind("<Leave>", _on_leave)
         item_frame = tk.Frame(frame, bg=colors["card_bg"])
@@ -253,10 +232,9 @@ class ListCardMixin:
 
         colors = getattr(self, 'COLORS', _DEFAULT_COLORS)
 
-        for w in slot['editions_container'].winfo_children():
-            w.destroy()
-        other_editions = work.get('other_language_editions_in_db', [])
-        for edition in other_editions:
+        # 构建 edition 显示项，再池化复用标签，避免每次翻页 destroy/重建
+        edition_items = []
+        for edition in work.get('other_language_editions_in_db', []):
             if edition.get('source_id'):
                 lang = edition.get('lang', '')
                 ed_id = edition.get('source_id', '')
@@ -268,12 +246,24 @@ class ListCardMixin:
                 else:
                     ed_text = f"{lang}:{ed_id}"
                     ed_fg = "#9C27B0"
-                ed_label = tk.Label(slot['editions_container'],
-                                    text=ed_text, font=TINY,
-                                    foreground=ed_fg, bg=colors["card_bg"], anchor=tk.W, cursor="hand2")
-                ed_label.pack(side=tk.LEFT, padx=(2, 0))
-                ed_label._edition_sid = ed_id
-                ed_label.bind("<Button-1>", self._on_edition_click)
+                edition_items.append((ed_text, ed_fg, ed_id))
+
+        ed_labels = slot.setdefault('_edition_labels', [])
+        while len(ed_labels) < len(edition_items):
+            lbl = tk.Label(slot['editions_container'], font=TINY,
+                           bg=colors["card_bg"], anchor=tk.W, cursor="hand2")
+            lbl.pack(side=tk.LEFT, padx=(2, 0))
+            lbl.bind("<Button-1>", self._on_edition_click)
+            ed_labels.append(lbl)
+        for i, lbl in enumerate(ed_labels):
+            if i < len(edition_items):
+                text, fg, sid = edition_items[i]
+                lbl.config(text=text, foreground=fg)
+                lbl._edition_sid = sid
+                if not lbl.winfo_manager():
+                    lbl.pack(side=tk.LEFT, padx=(2, 0))
+            else:
+                lbl.pack_forget()
 
         slot['img_label'].config(image="", text="加载中", bg=colors["border"], fg=colors["text_hint"])
         thumbnail = work.get("thumbnailCoverUrl", "")

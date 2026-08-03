@@ -132,9 +132,13 @@ class ListMixin(ListCardMixin):
             slot = self._card_slots[idx]
             slot['frame'].pack(fill=tk.X, padx=5, pady=5)
 
+        # 批量查询翻译缓存，避免每张卡片在 UI 线程单独执行一次 SQL
+        work_ids = [str(w.get('id', '')) for w in self.works]
+        translation_map = self.db.get_translated_titles(work_ids) if work_ids else {}
+
         for idx, work in enumerate(self.works):
             slot = self._card_slots[idx]
-            thumb_url = self._update_slot(slot, idx, work)
+            thumb_url = self._update_slot(slot, idx, work, translation_map)
             if thumb_url:
                 thumbnails_to_fetch.append((slot, thumb_url, idx))
 

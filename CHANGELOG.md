@@ -1,3 +1,10 @@
+## v1.61.0
+
+- **优化**：翻页渲染性能 — 列表卡片渲染三处热点优化（每页 20 张卡片 × ~17 个 widget）：
+  1. **批量翻译查询**：`display_works_list`（`list_mixin.py`）原本每张卡片单独执行 `get_translated_title`（每次新建 SQLite 连接 + SELECT，约 20 次全阻塞在 UI 线程）。新增 `DatabaseManager.get_translated_titles`（`database.py`）一次 `WHERE work_id IN (...)` 批量查询，翻页时 20 次 → 1 次，结果统一传给 `_update_slot`
+  2. **editions 标签池化**：`_update_slot`（`list_card.py`）原来每次翻页 `destroy()` 全部 edition Label 再逐个重建，改为 `_edition_labels` 池复用，翻页仅 `config(text/foreground)` 更新 + `pack_forget` 隐藏多余项，不再反复创建销毁 widget
+  3. **hover 去递归**：`_hover_children`（`list_card.py`）每次鼠标 Enter/Leave 递归遍历约 340 个子 widget 逐个 `cget`/`config`，连续滚动时频繁触发。改为 hover 仅改卡片 frame 背景，删除递归函数（清理死代码）
+
 ## v1.60.2
 
 - **修复**：搜索不存在的 RJ ID 时 `_on_search_success` 崩溃 `AttributeError: 'NoneType' object has no attribute 'get'` — 搜索不存在/API 404 时 `fetch_work_detail`（`api_client.py:187`）返回 `None` 而不抛异常（404 是正常 HTTP 响应，不算请求失败），`_search_by_id_async`（`search_mixin.py:373`）未判空，把 `None` 经 `after(0, _on_search_success, None)` 传给回调，`work_data.get("source_id")` 对 `None` 调用崩溃。修复：`_search_by_id_async` 异步边界加 `not work_data` 检查，`None`/空 dict 路由到 `_on_search_error` 弹出"未找到 RJ{id} 的作品"提示。覆盖普通 ID 搜索（`search_mixin.py:170`）与版本 ID 搜索（`search_mixin.py:368`）两条路径（`_on_search_success` 全项目唯一调用方）
