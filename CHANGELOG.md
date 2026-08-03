@@ -1,3 +1,7 @@
+## v1.60.1
+
+- **修复**：下载窗口树刷新竞态导致 `TclError: Item not found` 连环报错 — 点"刷新"或重新加载时 `display_tree` 执行 `tree.delete` 清空整棵树重建，旧 item id（如 I005）全部失效，但 `_prev_selection` 未随之重置。下次 `<<TreeviewSelect>>` 事件触发 `on_select` 时 `newly_deselected` 混入失效 id，`get_children(item_id)` 抛 `TclError`；且异常发生在循环中途，`_prev_selection` 更新行永远执行不到，失效 id 持续残留，导致每次点击都重复报错。修复：①`display_tree`（`gui_download.py:145`）重建前重置 `_prev_selection` 并清空 `download_tasks`/`item_folder_path` 旧映射（避免多次刷新累积旧 id）；②`on_select` 循环加 `self.tree.exists(item_id)` 防御，失效 id 直接跳过，保证 `_prev_selection` 总能正常更新
+
 ## v1.60.0
 
 - **新增**：作品文件树(tracks)持久化缓存 — 双击作品弹出的下载窗口文件树原本只有内存缓存（`_APICache` TTL 120 秒），重启或超时后重新打开都要重新请求 API。新建 `WorkTracksManager`（`src/database/tracks.py`）将完整 tracks JSON（含 `mediaDownloadUrl`）持久化到 `download_history.db` 的 `work_tracks` 表。`DownloadWindow.load_tracks`（`gui_download.py:102`）改为三层查询（内存缓存 → DB 缓存 → API 拉取并落库），首次打开后再次双击同一作品秒级加载、无 API 请求。DB 复用 `DOWNLOAD_HISTORY_DB_PATH`，与 `pending_tasks` 共库

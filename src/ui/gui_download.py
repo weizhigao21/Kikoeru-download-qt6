@@ -143,6 +143,10 @@ class DownloadWindow:
         threading.Thread(target=run, daemon=True).start()
 
     def display_tree(self):
+        # 重建前重置选中状态与旧树映射，避免 on_select 引用已删除的 item id（TclError: Item not found）
+        self._prev_selection = set()
+        self.download_tasks.clear()
+        self.item_folder_path.clear()
         self.tree.delete(*self.tree.get_children())
         self.status_label.config(text="文件列表加载完成")
 
@@ -225,11 +229,12 @@ class DownloadWindow:
             newly_deselected = self._prev_selection - current
 
             for item_id in newly_deselected:
-                if self.tree.get_children(item_id):
+                # 树刷新时 _prev_selection 可能残留旧 item id，先确认节点仍存在
+                if self.tree.exists(item_id) and self.tree.get_children(item_id):
                     self.tree_selector.deselect_all_in_folder(item_id)
 
             for item_id in newly_selected:
-                if self.tree.get_children(item_id):
+                if self.tree.exists(item_id) and self.tree.get_children(item_id):
                     self.tree_selector.select_all_in_folder(item_id)
 
             self._prev_selection = set(self.tree.selection())
