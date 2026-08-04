@@ -895,10 +895,15 @@ class MainWindow(QMainWindow):
             self._load_downloaded_ids()
 
     def _open_download_dialog(self, work):
-        """双击作品 → 下载选择对话框（每次新建，完成后清理引用）。"""
+        """双击作品 → 下载选择对话框（每次新建，完成后清理引用）。
+
+        display_title 传译文标题（翻译缓存优先，无译文回退原文），
+        提交下载时目录名使用译文（对齐 tkinter 版 list_mixin._get_display_title）。
+        """
         from src.ui.qt.download_dialog import DownloadDialog
+        display = self.model.translated_title(work) or work.get("title", "")
         dlg = DownloadDialog(self, work, self.downloaded_ids_cache,
-                             tracks_cache=self.tracks_db)
+                             display_title=display, tracks_cache=self.tracks_db)
         self._dl_dialog = dlg
         dlg.finished.connect(lambda _r: setattr(self, "_dl_dialog", None))
         dlg.show()

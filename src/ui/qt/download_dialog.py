@@ -132,15 +132,21 @@ class TracksModel(QAbstractItemModel):
         return index.internalPointer()
 
     def node_path(self, index):
-        """从根到该节点的路径（目录拼接，末位 '/'）。"""
+        """从根到该节点的目录路径（对齐 tkinter 版 item_folder_path）。
+
+        只拼接 type=="folder" 的节点：叶子（audio/image/text）自身不算路径，
+        根级叶子返回空串（文件直接放作品目录），根级文件夹 → "文件夹名/"。
+        """
         parts = []
         cur = index
         while cur.isValid():
             node = cur.internalPointer()
-            parts.append(node.get("title", ""))
+            if node.get("type") == "folder":
+                parts.append(node.get("title", ""))
             p = self._parent_map.get(id(node))
             cur = cur.parent() if p is not None else QModelIndex()
-        return "/".join(reversed(parts)) + "/"
+        path = "/".join(reversed(parts))
+        return path + "/" if path else ""
 
 
 class _TracksLoader(QObject):

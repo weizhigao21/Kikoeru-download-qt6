@@ -1,3 +1,10 @@
+## v2.0.1
+
+- **修复**：下载时每个音频文件单独创建一个文件夹 — Qt 版下载对话框 `TracksModel.node_path`（`download_dialog.py`）把叶子节点自身的文件名也拼进 `subfolder`（如 `track1.mp3/`），提交时 `os.path.join(save_dir, subfolder)` 为每个文件建同名文件夹。改为只拼接 `type=="folder"` 的祖先节点、叶子自身不算路径、根级叶子返回空串（对齐 tkinter 版 `item_folder_path` 的 `current_path` 行为）
+- **修复**：下载目录名未使用已翻译标题 — `_open_download_dialog`（`main_window.py`）打开下载对话框时未传 `display_title`（译文），提交时 `submit_work["title"]` 保持原文，`WorkDownloader._get_save_dir` 生成的目录名用原文。补传 `model.translated_title(work) or work["title"]`（对齐 tkinter 版 `list_mixin._get_display_title`），无译文时回退原文
+- **变更**：PyInstaller 打包入口切换 — `音声浏览下载.spec` 入口由 `gui_app.py`（tkinter，已归档）改为 `app.py`（Qt6），README 补充打包说明
+- **文档**：README 修正 Qt6 迁移后的残留描述（Canvas/Progressbar/控件池/import_downloaded.py 等 tkinter 术语与失效章节）、补充标签 chip 颜色区分描述
+
 ## v2.0.0
 
 - **重大变更**：UI 框架从 Tkinter 迁移到 Qt6（PyQt6）— 长列表流畅度、跨线程安全、现代观感的整体换代。业务层（下载管理、数据库、API、翻译/转换服务）零改动复用。tkinter 版已归档至 `legacy_tk/`（git 历史可回退）

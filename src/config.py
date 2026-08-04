@@ -50,7 +50,7 @@ _USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) el
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v2.0.0"
+VERSION = "v2.0.1"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
