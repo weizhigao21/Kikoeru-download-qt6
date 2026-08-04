@@ -1,3 +1,11 @@
+## v2.0.2
+
+- **优化**：打包后启动速度整体提速 — 四项改动：
+  1. **模块导入瘦身**：`src/__init__.py` 移除顶层业务模块导入（`get_api_client`/`DatabaseManager`/`get_downloader` 等 5 个），`import src` 不再连带加载 requests/PIL/下载器（实测 0.028s、零重库加载）；各使用方改为从具体子模块导入，`main_window.py` 同步调整
+  2. **砍掉 tkinter 加载**：`cache.py` 顶层 `from PIL import Image, ImageTk` 拆为仅 `Image`，`ImageTk`（会连带 `import tkinter`）懒加载到 5 个 tkinter 专属方法内部；`fonts.py` 的 `tkinter.font` 移入 `get_tag_font()` 内懒加载 — Qt6 版启动不再加载 tcl/tk（节省打包体积约 5-10MB + tcl 解释器初始化时间）
+  3. **启动画面 + 延迟初始化**：新增 `QSplashScreen` 启动画面（`app.py`，深色底 + 应用名 + 版本，主窗口完全显示后自动关闭）；`MainWindow` 的已下载集合查询 / 未完成任务恢复 / 翻译配置 / 首页数据 4 项非关键初始化延迟到 `QTimer.singleShot(0)` 空闲期执行，主窗口秒出
+  4. **打包模式 onefile → onedir**：`音声浏览下载.spec` 改为输出文件夹（`dist/音声浏览下载/`），启动无需解压 PyQt6 全量依赖（onefile 每次启动解压耗时明显），并开启 `optimize=2`；分发时整个目录压缩为 zip 发布
+
 ## v2.0.1
 
 - **修复**：下载时每个音频文件单独创建一个文件夹 — Qt 版下载对话框 `TracksModel.node_path`（`download_dialog.py`）把叶子节点自身的文件名也拼进 `subfolder`（如 `track1.mp3/`），提交时 `os.path.join(save_dir, subfolder)` 为每个文件建同名文件夹。改为只拼接 `type=="folder"` 的祖先节点、叶子自身不算路径、根级叶子返回空串（对齐 tkinter 版 `item_folder_path` 的 `current_path` 行为）

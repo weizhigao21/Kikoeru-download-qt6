@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
 
 一个基于 Qt6（PyQt6）的桌面应用程序，用于浏览和下载 ASMR 音声作品。
 
@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v2.0.0**（当前版本，Qt6 UI）
+**v2.0.2**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -199,14 +199,14 @@ python app.py
 
 ## 打包发布
 
-使用 PyInstaller 打包为单文件 exe：
+使用 PyInstaller 打包（onedir 模式，启动免解压、速度更快）：
 
 ```bash
 pip install pyinstaller
 pyinstaller --noconfirm 音声浏览下载.spec
 ```
 
-产物位于 `dist/音声浏览下载.exe`。spec 已配置：入口 `app.py`（Qt6）、打包 `settings/` 与 `aria2/` 资源目录、`settings\ui.ico` 图标、`console=False`（无控制台窗口）。
+产物位于 `dist/音声浏览下载/` 目录（启动后约 1-2 秒出窗口），分发时将整个目录压缩为 zip 发布。spec 已配置：入口 `app.py`（Qt6）、打包 `settings/` 与 `aria2/` 资源目录、`settings\ui.ico` 图标、`console=False`（无控制台窗口）、`optimize=2`。v2.0.2 起启动优化：模块导入瘦身（`src/__init__.py` 不再顶层加载业务库）、`ImageTk`/`tkinter` 懒加载、QSplashScreen 启动画面 + 主窗口非关键初始化延迟、onefile → onedir 免解压。
 
 ## 主要模块
 

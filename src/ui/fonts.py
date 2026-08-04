@@ -4,8 +4,10 @@
 - UI_FONT_FAMILY: 主 UI 字体族（简体中文）
 - MONO_FONT_FAMILY: 等宽字体族（ID/百分比/速度等数字显示）
 - EMOJI_FONT_FAMILY: emoji 字体族（特殊符号控件，如 📋）
+
+注意：tkinter.font 只在 get_tag_font()（Canvas 文本测量，tkinter 专属）用到，
+故方法内懒加载，避免 Qt6 版启动时连带加载 tcl/tk。
 """
-import tkinter.font as tkfont
 
 # 字体族常量 —— 改字体族只改这里
 UI_FONT_FAMILY = "Microsoft YaHei UI"
@@ -41,5 +43,6 @@ def get_tag_font():
     """
     global _tag_font_cache
     if _tag_font_cache is None:
+        import tkinter.font as tkfont
         _tag_font_cache = tkfont.Font(family=UI_FONT_FAMILY, size=9)
     return _tag_font_cache

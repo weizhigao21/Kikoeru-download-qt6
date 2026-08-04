@@ -4,7 +4,10 @@ import threading
 import time
 import requests
 import logging
-from PIL import Image, ImageTk
+# 顶层只导入 PIL.Image（Qt6 版实际只用 Image）。
+# ImageTk 会连带 import tkinter，仅 tkinter 版方法需要，故放到方法内懒加载，
+# 避免打包后启动时白白加载 tcl/tk。
+from PIL import Image
 from collections import OrderedDict
 
 logger = logging.getLogger('cache')
@@ -143,6 +146,7 @@ class ImageCacheManager:
             try:
                 img = Image.open(cache_path)
                 img.load()
+                from PIL import ImageTk
                 photo = ImageTk.PhotoImage(img)
                 self.memory_cache.put(url, photo)
                 return photo
@@ -166,6 +170,7 @@ class ImageCacheManager:
                 img.load()
                 img_copy = img.copy()
                 img_copy.thumbnail(self._thumbnail_size, Image.Resampling.LANCZOS)
+                from PIL import ImageTk
                 photo = ImageTk.PhotoImage(img_copy)
                 self.memory_cache.put(cache_key, photo)
                 logger.debug("get_thumbnail 磁盘读取完成")
@@ -201,6 +206,7 @@ class ImageCacheManager:
             img = self._process_image(img_data)
             img.save(cache_path, 'JPEG', quality=85, optimize=True)
 
+            from PIL import ImageTk
             photo = ImageTk.PhotoImage(img)
             self.memory_cache.put(url, photo)
             self._schedule_disk_cleanup()
@@ -220,6 +226,7 @@ class ImageCacheManager:
 
             img_copy = img.copy()
             img_copy.thumbnail(self._thumbnail_size, Image.Resampling.LANCZOS)
+            from PIL import ImageTk
             photo = ImageTk.PhotoImage(img_copy)
             self.memory_cache.put(cache_key, photo)
             self._schedule_disk_cleanup()
@@ -237,6 +244,7 @@ class ImageCacheManager:
         pil_img = self._load_pil_from_url(url, size)
         if pil_img is None:
             return None
+        from PIL import ImageTk
         photo = ImageTk.PhotoImage(pil_img)
         self.memory_cache.put(cache_key, photo)
         return photo

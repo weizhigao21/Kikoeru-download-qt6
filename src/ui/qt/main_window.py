@@ -8,16 +8,18 @@
 """
 import logging
 
-from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QImage, QKeySequence, QPixmap, QShortcut
 from PyQt6.QtWidgets import (QInputDialog, QMainWindow, QMessageBox, QWidget,
                              QVBoxLayout, QHBoxLayout)
 
 from src import (VERSION, DB_PATH, CACHE_DIR, DOWNLOAD_HISTORY_DB_PATH,
-                 ICON_PATH, MEMORY_CACHE_SIZE, DatabaseManager,
-                 DownloadHistoryManager, ImageCacheManager, PendingTaskManager,
-                 WorkTracksManager, get_api_client)
+                 ICON_PATH, MEMORY_CACHE_SIZE)
 from src import config as _config
+from src.api_client import get_api_client
+from src.database import (DatabaseManager, DownloadHistoryManager,
+                          PendingTaskManager, WorkTracksManager)
+from src.database.cache import ImageCacheManager
 from src.download.manager import DownloadManager
 from src.download.models import TaskStatus
 from src.services.translator import get_translator
@@ -70,9 +72,9 @@ class MainWindow(QMainWindow):
         self.dl_manager.add_observer(self._downloads_changed.emit)
         self._last_done_ids = None
 
-        # 翻译服务初始化（对齐 tkinter 版：启动时把 config 同步给 translator 单例，
-        # 否则 AI_API_KEY 等配置未生效，右键翻译会报"未配置 API Key"）
-        self._init_translator()
+        # 翻译服务初始化（对齐 tkinter 版：把 config 同步给 translator 单例，
+        # 否则 AI_API_KEY 等配置未生效，右键翻译会报"未配置 API Key"）。
+        # 延迟到 _deferred_startup 空闲期执行（配置同步不影响窗口显示）。
 
         # 对话框引用（防重入/防 GC）
         self._dl_dialog = None
@@ -110,8 +112,15 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._setup_shortcuts()
         self._start_workers()
+        # 非关键初始化延迟到事件循环空闲期（QTimer.singleShot(0)）：
+        # 先让主窗口渲染出来、关闭启动画面，再执行 DB 查询/任务恢复等同步操作。
+        QTimer.singleShot(0, self._deferred_startup)
+
+    def _deferred_startup(self):
+        """窗口显示后的延迟初始化：已下载集合 / 任务恢复 / 翻译配置 / 首页数据。"""
         self._load_downloaded_ids()
         self._restore_pending_tasks()
+        self._init_translator()
         self._load_data(1)
 
     # ---------- UI ----------
