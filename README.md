@@ -1,12 +1,12 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
 
-一个基于 Tkinter 的桌面应用程序，用于浏览和下载 ASMR 音声作品。
+一个基于 Qt6（PyQt6）的桌面应用程序，用于浏览和下载 ASMR 音声作品。
 
-**GitHub 仓库**：https://github.com/weizhigao21/Kikoeru-download
+**GitHub 仓库**：https://github.com/weizhigao21/Kikoeru-download-qt6
 
 ## 版本
 
-**v1.60.2**（当前版本）
+**v2.0.0**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -25,6 +25,8 @@
 - **AI 标题翻译**：支持使用 OpenAI 兼容 API（如 DeepSeek、GPT 等）翻译作品标题
 - **思考模式**：支持 DeepSeek 思考模式（`thinking` + `reasoning_effort`），翻译更准确但响应更慢，可在设置中开关（默认开启）
 - **翻译按钮**：列表中复制按钮旁显示"翻译"按钮，一键翻译当前作品标题
+- **右键翻译菜单**（v2.0.0）：列表右键作品弹出「翻译」子菜单，支持翻译标题 / 编辑翻译 / 重新翻译 / 删除翻译
+- **翻译缓存显示**（v2.0.0）：翻页/搜索后列表卡片直接显示已缓存的译文
 - **标题切换**：翻译完成后标题旁显示"原/译"切换按钮，随时在原文和译文之间切换
 - **翻译持久化**：翻译结果保存到数据库，重启后仍然生效
 - **下载使用译文**：当标题显示为译文时，下载目录名自动使用译文标题
@@ -108,30 +110,33 @@
 
 ## 项目结构
 
-- `src/ui/detail_mixin.py` / `src/ui/detail_actions.py` — 详情面板（展示、滚动、懒加载、CV/厂商显示）+ 操作（隐藏、刷新、删除、复制）
-- `src/ui/list_mixin.py` / `src/ui/list_card.py` — 作品列表（缩略图加载、加载动画、滚动、canvas管理）+ 卡片（创建、标签渲染、AI翻译交互）
-- `src/ui/search_mixin.py` — 统一搜索（ID/标签/关键词、搜索框标签芯片）
-- `src/ui/filter_mixin.py` — 筛选排序（只看已下载、内存排序、封面补全）
-- `src/gui_app_ui.py` / `src/gui_app_nav.py` / `src/gui_app_events.py` — 主窗口 Mixin（`UISetupMixin` 样式/UI构建、`NavigationMixin` 数据加载/分页、`EventMixin` 搜索历史/快捷键）
+- `src/ui/qt/app.py` — Qt6 应用入口（`QApplication` + `MainWindow` + 全局字体/QSS）
+- `src/ui/qt/main_window.py` — 主窗口：导航/翻页/搜索/过滤编排、翻译动作、下载管理接线
+- `src/ui/qt/works_list.py` — 列表虚拟化（`WorksListView` + `WorksListModel` + `WorkCardDelegate` 全绘制卡片）
+- `src/ui/qt/detail_panel.py` — 详情面板（完整字段、FlowTags 圆角标签、可点击厂商、译/原切换）
+- `src/ui/qt/top_bar.py` / `bottom_bar.py` — 顶栏（tab/搜索/排序）与底栏（翻页居中/下载管理/设置）
+- `src/ui/qt/download_dialog.py` / `download_manager_dialog.py` / `settings_dialog.py` — 三个对话框（文件树/任务列表/设置五页）
+- `src/ui/qt/workers.py` — `DataWorker` / `ThumbnailWorker`（QThread + signal/slot 跨线程）
+- `src/ui/qt/qt_fonts.py` / `styles.py` — Qt 字体适配层（复用 `src/ui/fonts.py` 常量）与 QSS 样式
+- `legacy_tk/` — v2.0.0 归档的 tkinter 版 UI（gui_app*.py 与 src/ui 下 10 个模块）
 - `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
 - `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、线程安全单例、翻译缓存、思考模式、`_safe_callback` 异常保护）
-- 通过 Mixin 多继承组合到 WorkApp，MRO：`WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin`
 
 ```
 g:\code\音声下载\
-├── src/gui_app.py              # 主程序入口（Mixin模式组合，核心类 + 工具方法）
-├── src/gui_app_ui.py           # UISetupMixin（样式配置、UI构建、下载任务显示）
-├── src/gui_app_nav.py          # NavigationMixin（数据加载、分页导航、按钮状态管理）
-├── src/gui_app_events.py       # EventMixin（搜索历史、键盘快捷键、鼠标滚轮事件）
-├── src/                        # 核心业务模块包
+├── app.py                       # 程序入口（python app.py）
+├── legacy_tk/                   # tkinter 版 UI 归档（v2.0.0 起不再使用）
+├── src/                         # 核心业务模块包
 │   ├── __init__.py             # 统一导出
 │   ├── config.py               # 配置读取（默认值合并 + 解析错误日志 + 版本号常量）
 │   ├── api_client.py           # API 请求客户端（带指数退避重试 + 缓存去重）
 │   ├── database/
 │   │   ├── __init__.py
+│   │   ├── base.py             # BaseDatabaseManager（连接复用、close_all 注册表）
 │   │   ├── database.py         # DatabaseManager（作品缓存、翻译记录、数据库索引）
 │   │   ├── history.py          # DownloadHistoryManager（下载历史、作品详情更新、翻译标题）
 │   │   ├── pending.py          # PendingTaskManager（下载任务持久化、恢复）
+│   │   ├── tracks.py           # WorkTracksManager（作品文件树持久化缓存）
 │   │   └── cache.py            # 图片缓存（LRU内存+磁盘两级缓存）
 │   ├── download/
 │   │   ├── __init__.py
@@ -148,16 +153,16 @@ g:\code\音声下载\
 │   │   └── text_converter.py      # 繁简转换（UTF-8/Shift-JIS 回退、文件名+内容转换）
 │   └── ui/
 │       ├── __init__.py
-│       ├── detail_mixin.py     # DetailMixin（详情面板构建、展示、懒加载）
-│       ├── detail_actions.py   # DetailActionsMixin（隐藏作品、刷新信息、删除记录、复制）
-│       ├── list_mixin.py       # ListMixin（列表展示管理、缩略图加载、canvas滚动）
-│       ├── list_card.py        # ListCardMixin（卡片创建、标签Canvas渲染、AI翻译交互）
-│       ├── search_mixin.py     # 搜索逻辑（ID/标签/关键词/厂商、搜索框芯片）
-│       ├── filter_mixin.py     # 筛选排序（已下载、内存排序、封面补全）
-│       ├── gui_download.py     # 下载窗口（树形选择、提交即返回、译文标题）
-│       ├── gui_settings.py     # 设置窗口（含缓存管理、数据库路径自定义、AI翻译设置）
-│       ├── gui_download_manager.py # 下载管理窗口（正在下载/已完成、重试/取消、进度更新）
-│       └── tree_selector.py    # 树状图选择工具类
+│       ├── fonts.py             # 字体族常量 + 语义化字体元组（Qt 版复用）
+│       └── qt/
+│           ├── app.py           # QApplication 入口
+│           ├── main_window.py   # MainWindow（导航/搜索/翻译/下载接线）
+│           ├── works_list.py    # 列表虚拟化（Model + Delegate 全绘制）
+│           ├── detail_panel.py  # 详情面板
+│           ├── top_bar.py / bottom_bar.py
+│           ├── download_dialog.py / download_manager_dialog.py / settings_dialog.py
+│           ├── workers.py       # DataWorker / ThumbnailWorker
+│           └── styles.py / qt_fonts.py
 ├── settings/                   # 配置和数据库目录（默认位置）
 │   ├── config.json             # JSON 配置文件
 │   ├── works.db                # SQLite 数据库文件（作品缓存）
@@ -175,21 +180,23 @@ g:\code\音声下载\
 ## 环境依赖
 
 - Python 3.10+
-- tkinter (Python 内置)
+- PyQt6
 - requests
 - Pillow
 
 安装依赖：
 
 ```bash
-pip install requests Pillow
+pip install PyQt6 requests Pillow
 ```
 
 ## 运行方式
 
 ```bash
-python src/gui_app.py
+python app.py
 ```
+
+（或 `python -m src.ui.qt.app`）
 
 ## 导入本地下载记录
 
@@ -259,27 +266,18 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 - **manager_core.py** — `DownloadCoreMixin`：Aria2/直接下载提交逻辑、`_check_files_existence`/`_handle_task_completion`/`_safe_persist` 公共方法、队列模式处理
 - **manager_poll.py** — `DownloadPollMixin`：全局统一轮询循环（永不退出 + `_poll_wake_event` 唤醒）、Aria2/直接下载进度合并、失败自动重试（最多 3 次）、`_cleanup_and_reset_task` 公共清理方法、低速检测与自动重启（可配置阈值/时长/次数）
 
-### src/ui/tree_selector.py
-树状图选择工具类，提供：
-- `select_all()` - 全选所有节点
-- `deselect_all()` - 取消所有选中
-- `select_all_in_folder(folder_id)` - 全选文件夹内所有内容
-- `get_selected_leaf_items()` - 获取选中的叶子节点（文件）
-- `invert_selection()` - 反选所有节点
-- `expand_all()` / `collapse_all()` - 展开/折叠所有节点
+> 注：tkinter 版 UI 模块（tree_selector.py、list_card.py、detail_mixin.py 等 10 个文件）已随 v2.0.0 归档至 `legacy_tk/`，详见 CHANGELOG。
 
-### WorkApp (src/gui_app.py + src/gui_app_ui.py + src/gui_app_nav.py + src/gui_app_events.py)
-主应用程序类，通过 Mixin 多继承组合功能模块（拆分为 4 个文件，总行数从 891 行降至各文件均 ≤ 366 行）：
+### MainWindow (src/ui/qt/main_window.py)
+Qt6 主窗口类（v2.0.0），QThread + signal/slot 跨线程，替代 tkinter 版 Mixin 组合：
 
-- **src/gui_app.py**（272行）— `WorkApp` 类声明、`__init__` 初始化所有组件、工具方法（`_format_size`、`_format_speed`、`copy_to_clipboard`）、`_on_close()` 窗口关闭资源释放、`main` 入口
-- **src/gui_app_ui.py**（226行）— `UISetupMixin`：`_setup_styles()` 全局样式、`setup_ui()` 编排（拆分为 `_build_top_bar`/`_build_list_area`/`_build_detail_area`/`_build_bottom_bar` 四个私有方法）、`_create_task_slot()`/`_refresh_task_display()` 下载任务显示、`open_settings()`/`open_download_manager()` 窗口管理（均含 `winfo_exists` 去重）
-- **src/gui_app_nav.py**（363行）— `NavigationMixin`：`load_data_async()` 异步数据加载（闭包捕获 tab/page 快照避免竞态）、`_on_tab_changed()` 列表切换、`go_to_page()`/`prev_page()`/`next_page()` 分页导航（共用 `_navigate_search()` 公共方法）、`update_buttons()` 按钮状态管理按钮状态、`refresh_data()` 数据刷新
-- **src/gui_app_events.py**（126行）— `EventMixin`：`_push_search_history()`/`go_back_search()` 搜索历史导航（上限 50 条）、`_restore_search_state()` 搜索状态恢复（共用 `_restore_async_search()` 公共方法）、`_bind_shortcuts()` 鼠标滚轮/resize 绑定、`_on_mouse_wheel()`/`_on_linux_scroll()` 滚轮事件
-
-Mixin 继承链（MRO 从左到右，深度优先）：
-```
-WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMixin > FilterMixin > UISetupMixin > NavigationMixin > EventMixin
-```
+- **app.py** — `QApplication` 入口（全局字体微软雅黑 UI + QSS 样式 + logging 配置）
+- **main_window.py** — `MainWindow`：三 tab 导航、分页/搜索/过滤编排、右键翻译动作（翻译/编辑/重新翻译/删除）、下载管理与三个对话框接线、closeEvent 线程与数据库清理
+- **works_list.py** — `WorksListView` + `WorksListModel` + `WorkCardDelegate`：列表虚拟化，仅实例化可见行，卡片全 QPainter 绘制
+- **detail_panel.py** — `DetailPanel`（QScrollArea）：完整字段、FlowTags 圆角标签流式布局、可点击厂商、译/原切换、复制
+- **workers.py** — `DataWorker` / `ThumbnailWorker`：数据/图片后台线程，信号 queued 回主线程，generation 校验丢弃过期批次
+- **top_bar.py / bottom_bar.py** — 顶栏（tab/搜索/排序/状态）与底栏（翻页居中、下载管理/设置入口）
+- **download_dialog.py / download_manager_dialog.py / settings_dialog.py** — 下载文件树（三层 tracks 缓存）、任务列表（自绘进度条）、设置五页
 
 ## 界面说明
 
@@ -369,12 +367,10 @@ WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMix
 
 | 快捷键 | 功能 |
 |--------|------|
-| `Ctrl+F` | 聚焦搜索框 |
-| `←` / `→` | 上一页 / 下一页（搜索框内输入时不触发） |
+| `Ctrl+F` | 聚焦搜索框（并全选已有内容） |
+| `F5` | 刷新当前列表 |
 | `Up` / `Down` | 上一个作品 / 下一个作品（列表区导航，右侧详情同步更新） |
-| `PageUp` / `PageDown` | 上一页 / 下一页 |
-| `Ctrl+D` / `Enter` | 打开当前选中作品的下载窗口（搜索框内输入时不触发） |
-| `Esc` | 清除搜索状态（搜索框失去焦点、清除标签/关键词） |
+| `Enter` / 双击 | 打开当前选中作品的下载窗口 |
 
 ## 设置与缓存管理
 
@@ -404,7 +400,7 @@ WorkApp > DetailMixin(DetailActionsMixin) > ListMixin(ListCardMixin) > SearchMix
 历史修复和优化记录已迁移至 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 待优化
-- **虚拟滚动**：只渲染可见区域的列表项
+- ~~**虚拟滚动**：只渲染可见区域的列表项~~（v2.0.0 已实现：`QListView` + Delegate 全绘制，仅实例化可见行）
 
 ### 🏗️ 架构改进方案
 
@@ -470,7 +466,7 @@ class EventBus:
 #### 界面响应性
 - **添加加载状态**：所有长时间操作显示进度条
 - **实现骨架屏**：数据加载时显示占位符
-- **优化滚动性能**：实现虚拟滚动，只渲染可见区域
+- ~~**优化滚动性能**：实现虚拟滚动，只渲染可见区域~~（v2.0.0 已实现）
 - **添加动画效果**：平滑过渡动画提升用户体验
 
 #### 错误处理增强
@@ -602,7 +598,7 @@ class StructuredLogger:
 - 定期进行代码审查
 
 #### 待实现
-1. 虚拟滚动优化
+1. ~~虚拟滚动优化~~（v2.0.0 已实现）
 2. 主题切换功能
 
 ## 更新日志

@@ -147,6 +147,19 @@ def _cache_key(*args):
     return "|".join(str(a) for a in args)
 
 
+def _extract_total(data) -> int:
+    """从响应提取作品总数，兼容 data['total'] 与 data['pagination']['totalCount']。"""
+    if not isinstance(data, dict):
+        return 0
+    total = data.get("total") or 0
+    if total:
+        return total
+    pagination = data.get("pagination")
+    if isinstance(pagination, dict):
+        return pagination.get("totalCount") or 0
+    return 0
+
+
 def _fetch_works_page_impl(key_prefix, page, page_size):
     """推荐作品 / 最新收录 共用的作品列表获取实现（两者请求 URL 和参数完全相同）。"""
     key = _cache_key(key_prefix, page, page_size)
@@ -167,7 +180,7 @@ def _fetch_works_page_impl(key_prefix, page, page_size):
             result = (works, max_page)
         else:
             works = data.get("works", data.get("list", []))
-            total = data.get("total", 0)
+            total = _extract_total(data)
             max_page = max(1, (total + page_size - 1) // page_size) if total else page + 1
             result = (works, max_page)
         _cache.put(key, result)
@@ -241,14 +254,14 @@ def _parse_search_response(data, page, page_size):
         return ([], 1)
     if isinstance(data, dict) and "works" in data:
         works = data.get("works", [])
-        total = data.get("total", 0)
+        total = _extract_total(data)
         max_page = max(1, (total + page_size - 1) // page_size) if total else 1
         return (works, max_page)
     if isinstance(data, dict) and "data" in data:
         inner = data["data"]
         if isinstance(inner, dict) and "works" in inner:
             works = inner.get("works", [])
-            total = inner.get("total", 0)
+            total = _extract_total(inner) or _extract_total(data)
             max_page = max(1, (total + page_size - 1) // page_size) if total else 1
         elif isinstance(inner, list):
             works = inner

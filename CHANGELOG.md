@@ -1,3 +1,23 @@
+## v2.0.0
+
+- **重大变更**：UI 框架从 Tkinter 迁移到 Qt6（PyQt6）— 长列表流畅度、跨线程安全、现代观感的整体换代。业务层（下载管理、数据库、API、翻译/转换服务）零改动复用。tkinter 版已归档至 `legacy_tk/`（git 历史可回退）
+- **新增**：列表虚拟化 — `QListView` + `WorksListModel` + `WorkCardDelegate` 全绘制卡片，仅实例化可见行（每页约 10-12 个 widget，原 tkinter 约 340 个），滚动/翻页流畅
+- **新增**：跨线程安全 — 数据/缩略图加载改为 `QThread` + `moveToThread`，结果经 signal/slot queued 自动回主线程（替代 `root.after(0, ...)` 手动调度 + `_nav_generation` 防过期）；图片管线后台 `QImage` 解码 → `QByteArray` → 主线程 `QPixmap.fromImage`
+- **新增**：详情面板重写 — `QScrollArea` 完整字段展示、`FlowTags` 圆角标签流式布局、可点击厂商搜索、标题译/原切换 + 复制、封面大图、隐藏/刷新/删除下载记录
+- **新增**：三个对话框重写 — 下载选择（`QTreeView` + 自定义树模型，三层 tracks 缓存）、下载管理（`QTableView` + 自绘进度条 delegate、正在下载/已完成双页）、设置（左侧导航 + `QStackedWidget` 五页）
+- **新增**：列表右键翻译子菜单 — 右键作品弹出「翻译」子菜单，含**翻译标题 / 编辑翻译 / 重新翻译 / 删除翻译**四个动作（编辑用多行输入框、重新翻译清空内存+DB 缓存后强制走 API、删除恢复原文）
+- **新增**：翻译缓存列表显示 — 翻页/搜索/过滤后批量读取 `translations` 表注入模型，列表卡片与详情面板直接显示译文（对齐 tkinter 版卡片行为）
+- **新增**：翻页控件居中显示；下载窗口文件树列头显示「名称 / 文件大小 / 时间」（`TracksModel.headerData` + `QHeaderView` QSS）
+- **新增**：窗口图标使用 `settings/ui.ico`（标题栏 + 任务栏 + 对话框）；标签点击搜索 — 列表卡片与详情面板的标签均可点击按标签搜索（对齐 tkinter 版），支持**多标签累积**（点击不同标签追加条件，顶栏显示多个并排靠左的标签 chip，每个带 ✕ 可单独移除），chip 使用标签色池**循环上色**（多标签颜色区分、悬停加深），点击标签后搜索框/搜索按钮隐藏、移除全部标签后恢复
+- **修复**：标签/版本标签点击命中错位 — 卡片绘制（paint）与点击命中（_tag_at/_edition_sid_at）的标题行高计算不一致：paint 用译文标题（`_display_title`），命中用原文标题，有翻译缓存时卡片内容下移 26px，点击标签落空；统一提取 `_title_extra` 使绘制与命中共用同一计算
+- **新增**：快捷键 `Ctrl+F`（聚焦搜索并全选）、`F5`（刷新）；列表 Enter/双击统一走 `activated` 信号打开下载窗口（避免双触发）
+- **修复**：厂商搜索翻页失效 — 搜索结果回调无条件重置页码把翻页打回第 1 页，移除回调中页码重置
+- **修复**：分页数显示错误（显示 1/1 实际 4 页）— API 总数在 `pagination.totalCount` 而非 `total`，`_extract_total()` 兼容新旧格式
+- **修复**：右键翻译报「未配置 API Key」但配置存在 — Qt 版启动时未把 config 同步给 translator 单例，补 `_init_translator`
+- **修复**：翻译结果未落库 — 保存键 `source_id` 与查询键数字 `id` 不一致，统一为 `str(work["id"])` 落库
+- **修复**：`_on_close` 线程/数据库清理迁移到 Qt `closeEvent`（线程 `quit`+`wait` + 四库 `close_all`）
+- **入口变更**：默认启动命令 `python app.py`（或 `python -m src.ui.qt.app`），替代 `python src/gui_app.py`
+
 ## v1.61.0
 
 - **优化**：翻页渲染性能 — 列表卡片渲染三处热点优化（每页 20 张卡片 × ~17 个 widget）：
