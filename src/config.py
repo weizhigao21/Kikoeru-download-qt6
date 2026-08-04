@@ -50,7 +50,25 @@ _USER_ROOT = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) el
 SETTINGS_DIR = os.path.join(_APP_ROOT, "settings")
 CONFIG_PATH = os.path.join(SETTINGS_DIR, "config.json")
 
-VERSION = "v2.0.2"
+
+def _get_pkg_root():
+    """打包内容根目录：PyInstaller 运行时的解压目录（sys._MEIPASS）；非打包指向项目根。"""
+    if getattr(sys, 'frozen', False):
+        return getattr(sys, '_MEIPASS', _APP_ROOT)
+    return _APP_ROOT
+
+
+_PKG_ROOT = _get_pkg_root()
+
+
+def _resolve_first(*candidates):
+    """按顺序返回第一个存在的路径；都不存在时返回第一个（由调用方自行兜底）。"""
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+VERSION = "v2.0.3"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -86,11 +104,23 @@ else:
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "works.db")
 DOWNLOAD_HISTORY_DB_PATH = os.path.join(DB_DIR, "download_history.db")
-ICON_PATH = os.path.join(SETTINGS_DIR, "ui.ico")
+# 图标：exe 旁 settings/ui.ico（用户可放自定义图标）优先，回退到打包内的默认图标
+ICON_PATH = _resolve_first(
+    os.path.join(SETTINGS_DIR, "ui.ico"),
+    os.path.join(_PKG_ROOT, "settings", "ui.ico"),
+)
 download_dir_cfg = _cfg["download_dir"]
 DOWNLOAD_DIR = download_dir_cfg if os.path.isabs(download_dir_cfg) else os.path.join(_APP_ROOT, download_dir_cfg)
 aria2_dir_cfg = _cfg["aria2_dir"]
-ARIA2_DIR = aria2_dir_cfg if os.path.isabs(aria2_dir_cfg) else os.path.join(_APP_ROOT, aria2_dir_cfg)
+if os.path.isabs(aria2_dir_cfg):
+    ARIA2_DIR = aria2_dir_cfg
+else:
+    _aria2_near_exe = os.path.join(_APP_ROOT, aria2_dir_cfg)
+    # exe 旁优先（用户可放自定义/新版 aria2.exe），回退到打包内容目录（onedir = _internal/）
+    if os.path.exists(os.path.join(_aria2_near_exe, "aria2.exe")):
+        ARIA2_DIR = _aria2_near_exe
+    else:
+        ARIA2_DIR = os.path.join(_PKG_ROOT, aria2_dir_cfg)
 
 AI_TRANSLATE_ENABLED = _cfg["ai_translate_enabled"]
 AI_API_KEY = _cfg["ai_api_key"]

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 音声作品浏览下载
 
 一个基于 Qt6（PyQt6）的桌面应用程序，用于浏览和下载 ASMR 音声作品。
 
@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v2.0.2**（当前版本，Qt6 UI）
+**v2.0.3**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -206,7 +206,17 @@ pip install pyinstaller
 pyinstaller --noconfirm 音声浏览下载.spec
 ```
 
-产物位于 `dist/音声浏览下载/` 目录（启动后约 1-2 秒出窗口），分发时将整个目录压缩为 zip 发布。spec 已配置：入口 `app.py`（Qt6）、打包 `settings/` 与 `aria2/` 资源目录、`settings\ui.ico` 图标、`console=False`（无控制台窗口）、`optimize=2`。v2.0.2 起启动优化：模块导入瘦身（`src/__init__.py` 不再顶层加载业务库）、`ImageTk`/`tkinter` 懒加载、QSplashScreen 启动画面 + 主窗口非关键初始化延迟、onefile → onedir 免解压。
+产物为 `dist/音声浏览下载/` 目录（单个 exe + `_internal/` 依赖目录），启动约 1-2 秒出窗口，分发时将整个目录压缩为 zip 发布。spec 已配置：入口 `app.py`（Qt6）、`settings\ui.ico` 图标、`console=False`（无控制台窗口）、`optimize=2`、排除 tkinter/pywin32 等未用库。
+
+### 外部资源目录
+
+| 目录 | 用途 | 查找顺序 |
+|---|---|---|
+| `aria2/` | aria2.exe 等下载工具 | exe 旁 `aria2/` 优先 → `_internal/aria2/` 回退；config.json 的 `aria2_dir` 可指定绝对路径 |
+| `settings/` | config.json 配置、works.db / download_history.db 数据库（首次运行自动创建） | exe 旁 `settings/` |
+| `downloads/` | 下载作品存放 | exe 旁 `downloads/`，config.json 的 `download_dir` 可指定绝对路径 |
+
+启动优化：v2.0.2 起模块导入瘦身、`ImageTk`/`tkinter` 懒加载、QSplashScreen 启动画面 + 主窗口非关键初始化延迟；v2.0.3 起 onedir 免解压（启动实测约 1.4 秒）+ 外部资源路径回退。
 
 ## 主要模块
 

@@ -1,3 +1,11 @@
+## v2.0.3
+
+- **打包模式：onedir 文件夹 + 外部资源路径回退**（启动提速：单文件 onefile 解压慢 2 秒+，onedir 免解压，实测启动 4-6 秒 → 约 1.4 秒）：
+  1. `音声浏览下载.spec` 使用 onedir 模式（`dist/音声浏览下载/`：单个 exe + `_internal/` 依赖目录），分发时整个目录压缩为 zip；保留 `optimize=2`
+  2. **外部资源 exe 旁优先、打包内容回退**：`aria2/`（exe 旁 `aria2/` 优先 → `_internal/aria2/` 回退；`config.json` 的 `aria2_dir` 可指定绝对路径）、`settings/`（config.json 与数据库，首次运行自动创建；ui.ico 默认图标打进 `_internal/settings/` 作回退）、`downloads/`（`config.json` 的 `download_dir` 可指定绝对路径）
+  3. `src/config.py` 新增 `_get_pkg_root`（`sys._MEIPASS`）与 `_resolve_first`（exe 旁优先）路径回退：`ICON_PATH`、`ARIA2_DIR` 均支持"exe 旁 → 打包内容"两级查找
+  4. spec `excludes` 排除 tkinter / pywin32 全家 / pythonnet / pyreadline3 等未用库（拦截 `pywin32_bootstrap` 元路径引导误收集，体积 64.7MB → 58.5MB）
+
 ## v2.0.2
 
 - **优化**：打包后启动速度整体提速 — 四项改动：
