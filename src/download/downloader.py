@@ -7,6 +7,7 @@ import logging
 from xmlrpc.client import ServerProxy
 from .. import config as _config
 from ..database.cache import get_http_session
+from ..services.text_converter import convert_traditional_to_simplified
 from ..utils import strip_rj_prefix
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,10 @@ class WorkDownloader:
             if extra_chars:
                 illegal_chars |= set(extra_chars)
             safe_title = "".join(c for c in title if c not in illegal_chars)[:50]
+            # 繁简转换：下载目录名直接生成简体（开启繁简转换时），
+            # 避免下载完成后作品文件夹名保持繁体（process_directory 只转文件名不转目录名）
+            if _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
+                safe_title = convert_traditional_to_simplified(safe_title)
             folder_name = f"{source_id}-{safe_title}"
             self._save_dir = os.path.join(_config.DOWNLOAD_DIR, folder_name)
             os.makedirs(self._save_dir, exist_ok=True)

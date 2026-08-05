@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import zhconv
 
@@ -76,11 +77,20 @@ def convert_filename(file_path: str) -> str:
             new_path = os.path.join(dir_name, f"{name}_{counter}{ext}")
 
         try:
-            os.rename(file_path, new_path)
-            return new_path
+            # 下载完成瞬间文件可能仍被 aria2/Defender 短暂占用，重命名失败时延迟重试
+            for attempt in range(4):
+                try:
+                    os.rename(file_path, new_path)
+                    return new_path
+                except Exception:
+                    if attempt < 3:
+                        time.sleep(0.5)
+                    else:
+                        logger.exception("[繁简] 重命名文件失败: %s", file_path)
         except Exception:
             logger.exception("[繁简] 重命名文件失败: %s", file_path)
             return file_path
+        return file_path
     return file_path
 
 
