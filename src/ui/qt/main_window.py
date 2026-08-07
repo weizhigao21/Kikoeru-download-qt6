@@ -91,6 +91,8 @@ class MainWindow(QMainWindow):
         # 下载相关状态
         self.downloaded_ids_cache = set()
         self._all_downloaded_works = []
+        # 下载 tab 本地搜索结果缓存：None=未搜索（显示完整列表），[]=搜索无结果
+        self._downloaded_search_result = None
         self._downloaded_page = 1
         self.show_downloaded = SHOW_ALL
         self._hide_downloaded = False
@@ -154,6 +156,7 @@ class MainWindow(QMainWindow):
         self.top_bar.search_btn.clicked.connect(self._do_search)
         self.top_bar.search_entry.returnPressed.connect(self._do_search)
         self.top_bar.tagRemoved.connect(self._on_tag_removed)
+        self.top_bar.circleRemoved.connect(self._on_circle_removed)
         self.top_bar.hide_dl_btn.clicked.connect(self._toggle_hide_downloaded)
         self.top_bar.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         # 底栏事件
@@ -250,6 +253,7 @@ class MainWindow(QMainWindow):
             page = self.current_page
         page = max(1, min(page, self.max_page))
         self.current_page = page
+        self.page_entry.setText(str(page))
         self._nav_generation += 1
         gen = self._nav_generation
         self._set_status("加载中...")
@@ -298,8 +302,8 @@ class MainWindow(QMainWindow):
 
     def _update_nav_buttons(self):
         if self.current_tab == "download":
-            total_pages = max(1, (len(self._all_downloaded_works) + PAGE_SIZE - 1) // PAGE_SIZE) \
-                if self._all_downloaded_works else 1
+            base = self._downloaded_search_result if self._downloaded_search_result is not None else self._all_downloaded_works
+            total_pages = max(1, (len(base) + PAGE_SIZE - 1) // PAGE_SIZE) if base else 1
             self.bottom_bar.prev_btn.setEnabled(self._downloaded_page > 1)
             self.bottom_bar.next_btn.setEnabled(self._downloaded_page < total_pages)
         else:
@@ -319,29 +323,52 @@ class MainWindow(QMainWindow):
         self.max_page = max(max_page or 1, 1)
         # 注意：不能在这里重置 current_page/page_entry——`_search()` 已按请求页设置，
         # 重置会导致搜索翻页结果一返回就被打回第 1 页（下一页无法使用）
-        desc = {"id": "RJ ID", "keyword": "关键词", "circle": "厂商", "tag": "标签"}.get(query_type, "搜索")
-        query_text = " + ".join(query) if isinstance(query, (list, tuple)) else query
+        desc = {"id": "RJ ID", "keyword": "关键词", "circle": "厂商", "tag": "标签", "combo": "厂商+标签"}.get(query_type, "搜索")
+        if query_type == "combo":
+            tags, circle = query
+            query_text = f"{circle} + {' + '.join(tags)}"
+        elif isinstance(query, (list, tuple)):
+            query_text = " + ".join(query)
+        else:
+            query_text = query
         self._show_works(works, f"{desc}「{query_text}」第 {self.current_page}/{self.max_page} 页 · {len(works)} 条")
 
     def _on_downloads_loaded(self, gen, works, sort_key):
         if gen != self._nav_generation:
             return
         self._all_downloaded_works = works
+        self._downloaded_search_result = None
         self._downloaded_page = 1
         self.page_entry.setText("1")
-        self._show_downloaded_page()
+        # 从其他 tab 带过来的保留条件：加载完成后自动本地过滤
+        if self.keyword_query or self.circle_query or self.current_tags:
+            self._search_in_downloaded_works()
+        else:
+            self._show_downloaded_page()
 
     def _show_downloaded_page(self):
-        total = len(self._all_downloaded_works)
+        base = self._downloaded_search_result if self._downloaded_search_result is not None else self._all_downloaded_works
+        total = len(base)
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         self.max_page = total_pages
         start = (self._downloaded_page - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
-        self._show_works(
-            self._all_downloaded_works[start:end],
-            f"已下载 {total} 个作品，第 {self._downloaded_page}/{total_pages} 页",
-        )
+        if self._downloaded_search_result is not None:
+            status = f"已下载作品中搜索{self._downloaded_search_desc()}: {total} 个，第 {self._downloaded_page}/{total_pages} 页"
+        else:
+            status = f"已下载 {total} 个作品，第 {self._downloaded_page}/{total_pages} 页"
+        self._show_works(base[start:end], status)
         self.page_entry.setText(str(self._downloaded_page))
+
+    def _downloaded_search_desc(self):
+        parts = []
+        if self.current_tags:
+            parts.append("标签「" + " + ".join(self.current_tags) + "」")
+        if self.circle_query:
+            parts.append("厂商「" + self.circle_query + "」")
+        if self.keyword_query:
+            parts.append("关键词「" + self.keyword_query + "」")
+        return " + ".join(parts)
 
     def _on_data_failed(self, gen, error):
         if gen != self._nav_generation:
@@ -469,6 +496,68 @@ class MainWindow(QMainWindow):
         self.current_tags = []
         self.top_bar.search_entry.clear()
         self.top_bar.clear_tag_chips()
+        self.top_bar.clear_circle_chip()
+
+    def _search_current_conditions(self, page):
+        """按当前条件分发搜索：下载 tab 走本地数据库过滤；
+        其余 tab：厂商+标签组合 → combo；仅厂商 → circle；仅标签 → tag。"""
+        if self.current_tab == "download":
+            # 下载 tab 只做本地数据库过滤，不调 API（切到最新/推荐才走 API 搜索）
+            self._search_in_downloaded_works()
+            return
+        if self.circle_query and self.current_tags:
+            self._search("combo", (list(self.current_tags), self.circle_query), page)
+        elif self.circle_query:
+            self._search("circle", self.circle_query, page)
+        elif self.current_tags:
+            self._search("tag", list(self.current_tags), page)
+        else:
+            self._restore_default_list(page)
+
+    def _search_in_downloaded_works(self):
+        """下载 tab 的本地数据库搜索（对齐 tkinter filter_mixin._search_in_downloaded_works）。
+
+        在已加载的下载作品（_all_downloaded_works）上按 标签/厂商/关键词 组合过滤，
+        不发起任何 API 请求。
+        """
+        filtered = []
+        for work in self._all_downloaded_works or []:
+            match = True
+            title = work.get("title", "").lower()
+            source_id = work.get("source_id", "")
+            if self.current_tags:
+                work_tags = []
+                for tag in work.get("tags", []):
+                    if isinstance(tag, dict) and tag.get("i18n", {}).get("zh-cn", {}).get("name"):
+                        work_tags.append(tag["i18n"]["zh-cn"]["name"].lower())
+                    elif isinstance(tag, str):
+                        work_tags.append(tag.lower())
+                for st in self.current_tags:
+                    if st.lower() not in work_tags:
+                        match = False
+                        break
+            if match and self.keyword_query:
+                if self.keyword_query.lower() not in title and self.keyword_query.lower() not in source_id.lower():
+                    match = False
+            if match and self.circle_query:
+                circle = work.get("circle", {})
+                circle_name = circle.get("name", "").lower() if isinstance(circle, dict) else ""
+                if self.circle_query.lower() not in circle_name:
+                    match = False
+            if match:
+                filtered.append(work)
+        self._downloaded_search_result = filtered
+        self._downloaded_page = 1
+        self.page_entry.setText("1")
+        self._show_downloaded_page()
+
+    def _restore_default_list(self, page=1):
+        """无搜索条件时回到当前 tab 的默认列表（用户从哪个页面进来就回哪个页面）。"""
+        if self.current_tab == "download":
+            self._downloaded_search_result = None
+            self._show_downloaded_page()
+        else:
+            self._load_data(page)
 
     def _do_search(self):
         text = self.top_bar.search_entry.text().strip()
@@ -477,6 +566,8 @@ class MainWindow(QMainWindow):
             return
         self.current_tags = []
         self.circle_query = ""
+        self.top_bar.clear_tag_chips()
+        self.top_bar.clear_circle_chip()
         numeric = text.replace("RJ", "").replace("rg", "").replace("RG", "")
         if numeric.isdigit():
             self.keyword_query = ""
@@ -485,7 +576,11 @@ class MainWindow(QMainWindow):
         else:
             self.keyword_query = text
             self._push_search_history({"type": "keyword", "query": text})
-            self._search("keyword", text, 1)
+            if self.current_tab == "download":
+                # 下载 tab：本地数据库过滤；切到最新/推荐才走 API
+                self._search_in_downloaded_works()
+            else:
+                self._search("keyword", text, 1)
 
     def _search(self, query_type, query, page):
         self.current_page = page
@@ -496,45 +591,53 @@ class MainWindow(QMainWindow):
         self._data_worker.search.emit(query_type, query, page, gen)
 
     def search_by_circle(self, circle_name):
+        """按厂商搜索（详情面板厂商名点击触发，对齐 tkinter）。
+
+        厂商 chip 与标签 chips 可共存：已选的标签不清理，组合过滤。
+        """
         if not circle_name:
             return
         self.keyword_query = ""
-        self.current_tags = []
+        if not self.current_tags:
+            self._push_search_history({"type": "circle", "query": circle_name})
         self.circle_query = circle_name
-        self._push_search_history({"type": "circle", "query": circle_name})
-        self._search("circle", circle_name, 1)
+        self.top_bar.set_circle_chip(circle_name)
+        self._search_current_conditions(1)
 
     def search_by_tag(self, tag):
         """按标签搜索（列表卡片 / 详情面板标签点击触发，对齐 tkinter）。
 
         支持多标签累积：重复点击不同标签追加到 current_tags 一起搜索；
-        顶栏搜索框隐藏、显示标签 chips（每个带 ✕ 可移除）。
+        顶栏搜索框隐藏、显示标签 chips（每个带 ✕ 可移除），可与厂商 chip 共存。
         """
         if not tag:
             return
         self.keyword_query = ""
-        self.circle_query = ""
         if tag not in self.current_tags:
             self.current_tags.append(tag)
             self._push_search_history({"type": "tag", "query": list(self.current_tags)})
         self.top_bar.set_tag_chips(self.current_tags)
-        self._search("tag", list(self.current_tags), 1)
+        self._search_current_conditions(1)
+
+    def _on_circle_removed(self):
+        """厂商 chip 的「✕」被点击：移除厂商条件；
+        仍有标签则继续按标签搜索，否则回到进入搜索前的默认列表。"""
+        self.circle_query = ""
+        self.top_bar.clear_circle_chip()
+        self._search_current_conditions(1)
 
     def _on_tag_removed(self, tag):
-        """标签 chip 的「✕」被点击：移除该标签；仍有标签则继续多标签搜索，否则恢复列表。"""
+        """标签 chip 的「✕」被点击：移除该标签；
+        仍有标签/厂商则继续搜索，否则回到默认列表。"""
         if tag in self.current_tags:
             self.current_tags.remove(tag)
-        if self.current_tags:
-            self.top_bar.set_tag_chips(self.current_tags)
-            self._search("tag", list(self.current_tags), 1)
+        # 始终刷新标签 chips：空列表也会清掉该标签的 chip（避免残留）
+        self.top_bar.set_tag_chips(self.current_tags)
+        if self.current_tags or self.circle_query:
+            self._search_current_conditions(1)
         else:
-            self.keyword_query = ""
-            self.circle_query = ""
-            self.top_bar.clear_tag_chips()
-            if self.current_tab == "download":
-                self._load_downloads()
-            else:
-                self._load_data(1)
+            self._clear_search_state()
+            self._restore_default_list(1)
 
     def _on_edition_clicked(self, sid):
         """点击列表卡片中的"其他语言版本"标签 → 按版本 RJ ID 搜索（对齐 tkinter）。"""
@@ -543,6 +646,8 @@ class MainWindow(QMainWindow):
         self.keyword_query = ""
         self.current_tags = []
         self.circle_query = ""
+        self.top_bar.clear_tag_chips()
+        self.top_bar.clear_circle_chip()
         self._set_status(f"正在搜索其他版本: {sid}...")
         self._push_search_history({"type": "id", "query": sid})
         self._search("id", sid, 1)
@@ -550,18 +655,16 @@ class MainWindow(QMainWindow):
     def _navigate_search(self, page):
         """翻页时按当前搜索条件分发（下载 tab 走本地分页）。"""
         if self.current_tab == "download":
-            total_pages = max(1, (len(self._all_downloaded_works) + PAGE_SIZE - 1) // PAGE_SIZE) \
-                if self._all_downloaded_works else 1
+            base = self._downloaded_search_result if self._downloaded_search_result is not None else self._all_downloaded_works
+            total_pages = max(1, (len(base) + PAGE_SIZE - 1) // PAGE_SIZE) if base else 1
             if 1 <= page <= total_pages:
                 self._downloaded_page = page
                 self._show_downloaded_page()
             return
         if self.keyword_query:
             self._search("keyword", self.keyword_query, page)
-        elif self.circle_query:
-            self._search("circle", self.circle_query, page)
-        elif self.current_tags:
-            self._search("tag", list(self.current_tags), page)
+        elif self.circle_query or self.current_tags:
+            self._search_current_conditions(page)
         else:
             self._load_data(page)
 
@@ -589,13 +692,27 @@ class MainWindow(QMainWindow):
             return
         prev = self.search_history[-1]
         t = prev.get("type")
+        # 回退到历史搜索点：先清空当前所有搜索条件与 chips，再恢复目标状态
+        self.current_tags = []
+        self.circle_query = ""
+        self.keyword_query = ""
+        self.top_bar.clear_tag_chips()
+        self.top_bar.clear_circle_chip()
         if t == "keyword":
             self.keyword_query = prev.get("query", "")
             self.top_bar.search_entry.setText(self.keyword_query)
-            self._search("keyword", self.keyword_query, 1)
+            if self.current_tab == "download":
+                self._search_in_downloaded_works()
+            else:
+                self._search("keyword", self.keyword_query, 1)
         elif t == "circle":
             self.circle_query = prev.get("query", "")
-            self._search("circle", self.circle_query, 1)
+            self.top_bar.set_circle_chip(self.circle_query)
+            self._search_current_conditions(1)
+        elif t == "tag":
+            self.current_tags = list(prev.get("query", []))
+            self.top_bar.set_tag_chips(self.current_tags)
+            self._search_current_conditions(1)
         elif t == "id":
             self._search("id", prev.get("query", ""), 1)
 
@@ -607,25 +724,34 @@ class MainWindow(QMainWindow):
         self.current_tab = new_tab
         self.current_page = 1
         self.max_page = 1
-        self._clear_search_state()
+        # 保留搜索条件（关键词/厂商/标签与 chips）：切 tab 后用同一条件在新 tab 继续搜索
         self.search_history.clear()
         self.top_bar.back_btn.setEnabled(False)
         self._nav_generation += 1
+        self._downloaded_search_result = None
         if new_tab == "download":
             self.show_downloaded = DOWNLOADED_TAB
             self.top_bar.sort_container.setVisible(True)
             self.top_bar.hide_dl_btn.setVisible(False)
+            # 无条件加载完整列表；有保留条件则加载后由 _on_downloads_loaded 自动本地过滤
             self._load_downloads()
         else:
             self.top_bar.sort_container.setVisible(False)
             self.top_bar.hide_dl_btn.setVisible(True)
             self.show_downloaded = HIDE_DOWNLOADED if self._hide_downloaded else SHOW_ALL
             self.top_bar.hide_dl_btn.setText("隐藏下载" if self._hide_downloaded else "显示全部")
-            self._load_data(1)
+            # 有保留条件 → 按条件走 API 搜索；否则加载默认数据
+            if self.keyword_query:
+                self._search("keyword", self.keyword_query, 1)
+            elif self.circle_query or self.current_tags:
+                self._search_current_conditions(1)
+            else:
+                self._load_data(1)
 
     def _load_downloads(self):
         self._nav_generation += 1
         gen = self._nav_generation
+        self._downloaded_search_result = None
         sort_key = self.sort_map.get(self.top_bar.sort_combo.currentText(), "download_time_desc")
         self._set_status("正在加载已下载作品信息...")
         self._data_worker.downloads.emit(sort_key, gen)
@@ -648,6 +774,9 @@ class MainWindow(QMainWindow):
         if self.current_tab == "download" and self._all_downloaded_works:
             sort_key = self.sort_map.get(self.top_bar.sort_combo.currentText(), "download_time_desc")
             self._all_downloaded_works = self._sort_works(self._all_downloaded_works, sort_key)
+            # 本地搜索状态：搜索结果同样按当前排序刷新
+            if self._downloaded_search_result is not None:
+                self._downloaded_search_result = self._sort_works(self._downloaded_search_result, sort_key)
             self._downloaded_page = 1
             self.page_entry.setText("1")
             self._show_downloaded_page()

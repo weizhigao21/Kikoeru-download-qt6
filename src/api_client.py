@@ -227,8 +227,9 @@ def fetch_tracks(rj_id):
     return _fetch_or_dedup(key, do_fetch)
 
 
-def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE):
-    encoded_tag = _encode_tags(tags)
+def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE, circle: str = None):
+    """按标签搜索；circle 非空时与厂商组合过滤（`$circle:xx$ $tag:yy$` 空格分隔，实测有效）。"""
+    encoded_tag = _encode_tags(tags, circle)
     key = _cache_key("tag", encoded_tag, page, page_size)
     return _search_impl(key, encoded_tag, page, page_size)
 
@@ -293,10 +294,24 @@ def _search_impl(key, encoded_query, page, page_size):
     return _fetch_or_dedup(key, do_fetch)
 
 
-def _encode_tags(tags):
-    if isinstance(tags, list):
-        return requests.utils.quote(" ".join(tags), safe='')
-    return requests.utils.quote(str(tags), safe='')
+def _encode_tags(tags, circle: str = None):
+    """标签/厂商搜索编码。
+
+    - 厂商块：`$circle:xx$`（对齐 README 厂商搜索接口）。
+    - 标签块：单标签用 `$tag:xx$` 精确语法，避免被后端当作全文关键词混入标题匹配的作品；
+      多标签后端不支持 `$tag:a$$tag:b$`（返回 0），退化为空格分隔 AND。
+    - 组合：`$circle:xx$ $tag:yy$` 空格分隔（紧挨会返回 0 结果，实测）。
+    """
+    tag_list = tags if isinstance(tags, list) else [tags]
+    parts = []
+    if circle:
+        parts.append(f"$circle:{circle}$")
+    if tag_list:
+        if len(tag_list) == 1:
+            parts.append(f"$tag:{tag_list[0]}$")
+        else:
+            parts.append(" ".join(tag_list))
+    return requests.utils.quote(" ".join(parts), safe='')
 
 
 def clear_api_cache():
@@ -325,8 +340,8 @@ class APIClient:
     def fetch_tracks(self, rj_id):
         return fetch_tracks(rj_id)
 
-    def search_by_tag(self, tags, page=1, page_size=WORKS_PER_PAGE):
-        return search_by_tag(tags, page, page_size)
+    def search_by_tag(self, tags, page=1, page_size=WORKS_PER_PAGE, circle=None):
+        return search_by_tag(tags, page, page_size, circle)
 
     def search_by_keyword(self, keyword, page=1, page_size=WORKS_PER_PAGE):
         return search_by_keyword(keyword, page, page_size)

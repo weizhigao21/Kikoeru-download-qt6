@@ -1,3 +1,13 @@
+## v2.0.5
+
+- **新增：厂商搜索 chip** — 点击详情页厂商名称后，顶栏搜索框区域显示粉色「厂商: xxx」chip（带 ✕ 可移除，颜色对齐 tkinter 版 #E91E63）；点击 ✕ 移除后仍剩标签则继续搜索，无条件则回到进入搜索前的页面（`top_bar.set_circle_chip` / `_on_circle_removed`）
+- **新增：厂商 + 标签组合搜索** — 厂商 chip 与标签 chips 可共存并排显示，搜索同时按厂商与标签过滤（API 组合语法 `$circle:xx$ $tag:yy$` 空格分隔，实测紧挨会返回 0 结果；worker 新增 `combo` 类型，`_search_current_conditions` 统一分发）；翻页 / chip 移除 / 历史回退均按组合条件处理
+- **修复：标签搜索混入无标签作品** — `_encode_tags` 原将标签作为普通关键词传给后端全文搜索（标题/简介/ID 也匹配），导致名称含关键词但无该标签的作品被搜出；单标签改为 `$tag:xx$` 精确语法（实测 20/20 命中、结果总数 9318<9377），多标签保持空格分隔 AND（后端不支持 `$tag:a$$tag:b$`，会返回 0）
+- **新增：下载作品 tab 本地搜索** — 在「下载作品」tab 点击标签 / 厂商或关键词搜索只走本地数据库过滤（`_search_in_downloaded_works`，对齐 tkinter `filter_mixin`，在 `_all_downloaded_works` 上按标签/厂商/关键词组合过滤），不再调用 API 查询接口；切换到「最新/推荐」tab 才走 API 搜索（ID 搜索除外，保持全局查询）
+- **新增：切 tab 保留搜索条件** — `_on_tab_changed` 不再调用 `_clear_search_state`，关键词 / 厂商 / 标签与 chips 在切换 tab 时保留，切到新 tab 后用同一条件继续搜索（下载 tab 加载完成后自动本地过滤）
+- **修复：组合搜索下标签 chip 无法移除** — `_on_tag_removed` 移除最后一个标签且仍有厂商条件时不刷新 chips，导致标签 chip 残留；改为始终调用 `set_tag_chips`（空列表也清除）
+- **修复：普通分页页码输入框不更新** — `_load_data` 未更新 `page_entry`，最新 / 推荐 tab 普通翻页时页码始终显示 1；补充 `setText`
+
 ## v2.0.4
 
 - **修复：下载作品的繁简转换不生效**：

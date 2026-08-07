@@ -86,6 +86,11 @@ class DataWorker(QObject):
                 # 多标签：query 为标签列表（tkinter 版多标签同样传列表给 API）
                 works, max_page = self._api.search_by_tag(query, page)
                 self.search_loaded.emit(generation, works, max_page, query_type, query)
+            elif query_type == "combo":
+                # 厂商+标签组合：query 为 (tags, circle) 元组
+                tags, circle = query
+                works, max_page = self._api.search_by_tag(tags, page, circle=circle)
+                self.search_loaded.emit(generation, works, max_page, query_type, query)
             else:
                 self.search_loaded.emit(generation, [], 1, query_type, query)
         except Exception as e:

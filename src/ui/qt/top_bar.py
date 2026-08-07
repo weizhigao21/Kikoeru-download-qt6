@@ -21,14 +21,22 @@ _CHIP_HOVER = {
     "#BA68C8": "#8E24AA",
     "#4DB6AC": "#00897B",
 }
+# 厂商 chip 固定粉色系（对齐 tkinter 版厂商标签 #E91E63）
+_CIRCLE_COLOR = "#E91E63"
+_CIRCLE_HOVER = "#C2185B"
 
 
 class TopBarWidget(QWidget):
     # 某个标签 chip 的「✕」被点击（参数：被移除的标签）
     tagRemoved = pyqtSignal(str)
+    # 厂商 chip 的「✕」被点击
+    circleRemoved = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 当前搜索条件（厂商 + 标签可共存，chips 并排显示）
+        self._current_circle = None
+        self._current_tags = []
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -106,44 +114,66 @@ class TopBarWidget(QWidget):
         self.status_label.setMinimumWidth(170)
         lay.addWidget(self.status_label)
 
-    # ---------- 标签 chips ----------
-    def _rebuild_chips(self, tags):
-        """重建 chip 容器内容（多标签并排靠左，每个尾部 ✕ 可移除）。"""
+    # ---------- 搜索条件 chips（厂商 chip + 标签 chips 可共存） ----------
+    def _make_chip(self, text, color, hover):
+        chip = QPushButton(f"{text} ✕")
+        chip.setStyleSheet(f"""
+            QPushButton {{
+                background: {color}; color: white; border: none;
+                border-radius: 10px; padding: 4px 12px;
+            }}
+            QPushButton:hover {{ background: {hover}; }}
+        """)
+        # Fixed：搜索框隐藏后 sa_lay 无伸缩项，Preferred 会被剩余空间拉伸占满
+        chip.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        return chip
+
+    def _rebuild(self):
+        """按当前搜索条件（厂商 + 标签）重建 chips；全空则恢复搜索框。"""
         lay = self.tag_chips_container.layout()
         while lay.count():
             item = lay.takeAt(0)
             w = item.widget()
             if w:
                 w.deleteLater()
-        for i, tag in enumerate(tags):
-            chip = QPushButton(f"{tag} ✕")
-            # 颜色区分：不同标签取自 TAG_COLORS 色池循环上色，与列表/详情标签同色系
+        if not self._current_circle and not self._current_tags:
+            self.tag_chips_container.hide()
+            self.search_container.show()
+            return
+        # 厂商 chip 在最前（粉色固定），随后标签 chips（色池循环上色，与列表/详情同色系）
+        if self._current_circle:
+            chip = self._make_chip(f"厂商: {self._current_circle}", _CIRCLE_COLOR, _CIRCLE_HOVER)
+            chip.clicked.connect(lambda _=False: self.circleRemoved.emit())
+            lay.addWidget(chip)
+        for i, tag in enumerate(self._current_tags):
             color = TAG_COLORS[i % len(TAG_COLORS)]
             hover = _CHIP_HOVER.get(color, color)
-            chip.setStyleSheet(f"""
-                QPushButton {{
-                    background: {color}; color: white; border: none;
-                    border-radius: 10px; padding: 4px 12px;
-                }}
-                QPushButton:hover {{ background: {hover}; }}
-            """)
-            # Fixed：搜索框隐藏后 sa_lay 无伸缩项，Preferred 会被剩余空间拉伸占满
-            chip.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip = self._make_chip(tag, color, hover)
             chip.clicked.connect(lambda _=False, t=tag: self.tagRemoved.emit(t))
             lay.addWidget(chip)
         # 吸收额外空间：QBoxLayout 无伸缩项时会把剩余空间均分给每个 chip 导致居中，
         # 尾部 addStretch 让 chips 全部靠左（对齐 tkinter 版紧贴刷新按钮）
         lay.addStretch(1)
-
-    def set_tag_chips(self, tags):
-        """进入标签搜索：隐藏搜索框/按钮，显示标签 chips。"""
-        self._rebuild_chips(tags)
         self.search_container.hide()
         self.tag_chips_container.show()
 
+    def set_tag_chips(self, tags):
+        """设置标签 chips（不影响厂商 chip，两者可共存）。"""
+        self._current_tags = list(tags)
+        self._rebuild()
+
+    def set_circle_chip(self, circle):
+        """设置厂商 chip（不影响标签 chips，两者可共存）。"""
+        self._current_circle = circle
+        self._rebuild()
+
+    def clear_circle_chip(self):
+        """移除厂商 chip；仍剩标签则继续显示标签 chips，全空则恢复搜索框。"""
+        self._current_circle = None
+        self._rebuild()
+
     def clear_tag_chips(self):
-        """关闭标签搜索：恢复搜索框/按钮，隐藏 chips。"""
-        self._rebuild_chips([])
-        self.tag_chips_container.hide()
-        self.search_container.show()
+        """移除全部标签 chips；仍剩厂商 chip 则继续显示，全空则恢复搜索框。"""
+        self._current_tags = []
+        self._rebuild()
