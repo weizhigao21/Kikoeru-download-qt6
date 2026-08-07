@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v2.0.5**（当前版本，Qt6 UI）
+**v2.0.6**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -22,6 +22,7 @@
 - **标签搜索芯片**：点击标签后搜索框替换为彩色标签 chip（色池循环上色、悬停加深，每个带 ✕ 按钮可单独移除），支持多标签累积搜索；厂商 chip 与标签 chips 可并排共存，实现「厂商 + 标签」组合搜索
 - **下载作品本地搜索**：在「下载作品」tab 内点击标签/厂商或关键词搜索直接走本地数据库过滤（不请求 API），切换到「最新/推荐」tab 才走 API 搜索
 - **切换保留搜索条件**：切换 tab 后之前的标签/厂商/关键词搜索条件与 chips 保留，自动用同一条件在新 tab 继续搜索
+- **滚动位置重置**（v2.0.6）：翻页/搜索/刷新后列表滚动条自动回到顶部；详情刷新 / 隐藏作品 / 删除记录等局部操作保持当前滚动位置（`WorksListView.set_works(works, scroll_to_top)` 统一入口按场景控制）
 
 ### AI 翻译
 - **AI 标题翻译**：支持使用 OpenAI 兼容 API（如 DeepSeek、GPT 等）翻译作品标题
@@ -113,7 +114,7 @@
 
 - `src/ui/qt/app.py` — Qt6 应用入口（`QApplication` + `MainWindow` + 全局字体/QSS）
 - `src/ui/qt/main_window.py` — 主窗口：导航/翻页/搜索/过滤编排、翻译动作、下载管理接线
-- `src/ui/qt/works_list.py` — 列表虚拟化（`WorksListView` + `WorksListModel` + `WorkCardDelegate` 全绘制卡片）
+- `src/ui/qt/works_list.py` — 列表虚拟化（`WorksListView` + `WorksListModel` + `WorkCardDelegate` 全绘制卡片；`set_works(works, scroll_to_top)` 统一数据入口，翻页回顶/局部刷新保持位置）
 - `src/ui/qt/detail_panel.py` — 详情面板（完整字段、FlowTags 圆角标签、可点击厂商、译/原切换）
 - `src/ui/qt/top_bar.py` / `bottom_bar.py` — 顶栏（tab/搜索/排序）与底栏（翻页居中/下载管理/设置）
 - `src/ui/qt/download_dialog.py` / `download_manager_dialog.py` / `settings_dialog.py` — 三个对话框（文件树/任务列表/设置五页）

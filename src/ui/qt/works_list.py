@@ -4,7 +4,7 @@
 Model 只持有数据（QAbstractListModel），Delegate 用 QPainter 全绘制卡片；
 Qt 内置虚拟化——仅实例化可见行，widget 数量恒定，滚动流畅。
 """
-from PyQt6.QtCore import Qt, QAbstractListModel, QModelIndex, QRect, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QAbstractListModel, QModelIndex, QRect, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QListView, QMenu,
                              QStyledItemDelegate, QStyle)
@@ -322,6 +322,14 @@ class WorksListView(QListView):
         # 右键菜单
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
+
+    def set_works(self, works, scroll_to_top=False):
+        """替换列表数据。scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
+        局部刷新（详情刷新/隐藏/删除记录）传 False 保持当前滚动位置。"""
+        self.model().set_works(works)
+        if scroll_to_top:
+            # model reset 后 view 布局可能下一帧才稳定，延迟一帧保证滚动生效
+            QTimer.singleShot(0, self.scrollToTop)
 
     def _on_activated(self, index):
         work = self.model().work_at(index.row())

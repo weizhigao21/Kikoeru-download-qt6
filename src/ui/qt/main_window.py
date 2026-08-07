@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
         """公共展示：过滤 → model → 详情 → 缩略图 → 按钮状态。"""
         works = self._apply_filter(works)
         self.works = works
-        self.model.set_works(works)
+        self.list_view.set_works(works, scroll_to_top=True)
         self._sync_translations()
         self._set_status(status_text)
         self._request_thumbs()
@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
                 circle_data=data.get("circle", {}) or None,
                 other_editions=data.get("other_language_editions_in_db", []) or None,
             )
-        self.model.set_works(self.works)
+        self.list_view.set_works(self.works)
         self._sync_translations()
         self._set_status("✓ 作品信息已刷新")
         self._show_detail(work)
@@ -806,7 +806,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"✓ 已隐藏: {work.get('title', '')[:20]}...")
         if work in self.works:
             self.works.remove(work)
-        self.model.set_works(self.works)
+        self.list_view.set_works(self.works)
         self._sync_translations()
         if self.works:
             self._show_detail(self.works[0])
@@ -848,7 +848,7 @@ class MainWindow(QMainWindow):
         else:
             # 重新过滤当前列表（若该作品已不在列表，无需处理）
             if work in self.works:
-                self.model.set_works(self.works)
+                self.list_view.set_works(self.works)
                 self._sync_translations()
             self.detail_panel.show_work(work, self._is_downloaded(work))
 

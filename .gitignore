@@ -30,6 +30,9 @@ settings/config.json
 *.log
 logs/
 
+# WorkBuddy 项目记忆（本地数据，不纳入版本库）
+.workbuddy/
+
 # IDE
 .vscode/
 .idea/
