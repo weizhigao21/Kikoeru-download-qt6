@@ -84,8 +84,10 @@ class DownloadPollMixin:
                         for t in self.tasks.values()
                         if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
                     )
-                if not threads_alive:
-                    self._do_pending_flatten()
+                # 文件夹整理移出轮询线程（独立线程执行），避免阻塞其他任务进度轮询
+                if not threads_alive and self._pending_flatten and not self._flattening:
+                    self._flattening = True
+                    threading.Thread(target=self._flatten_worker, daemon=True).start()
 
             # 动态睡眠间隔：有活跃任务时 1s，完全空闲时 30s
             if has_downloading:
@@ -100,6 +102,13 @@ class DownloadPollMixin:
             self._poll_wake_event.wait(timeout=sleep_time)
             self._poll_wake_event.clear()
 
+    def _flatten_worker(self):
+        """文件夹整理后台线程：避免文件移动/删除阻塞全局轮询循环。"""
+        try:
+            self._do_pending_flatten()
+        finally:
+            self._flattening = False
+
     def _do_pending_flatten(self):
         """所有下载任务完成后，批量执行文件夹整理"""
         # 逐个处理：处理一个成功后才移除，防止中途失败丢失剩余目录
@@ -112,6 +121,8 @@ class DownloadPollMixin:
 
     def _on_task_completed(self, task):
         """任务完成时的处理（不立即整理文件夹）"""
+        # 兜底清理直接下载进度条目（覆盖"文件已存在直接完成"等旁路路径）
+        self._cleanup_direct_progress(task)
         if task.save_dir:
             from .. import config as _config
             if _config.AUTO_FLATTEN_ENABLED:
@@ -276,11 +287,30 @@ class DownloadPollMixin:
         if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             self._sync_task_status(task)
             self._slow_speed_tracker.pop(task.work_id, None)
+            self._slow_restart_count.pop(task.work_id, None)
+            # 终态清理：释放该任务的直接下载进度条目，防止 _download_progress 无界增长
+            self._cleanup_direct_progress(task)
             if task.status == TaskStatus.COMPLETED:
                 self._on_task_completed(task)
 
         if task.status == TaskStatus.DOWNLOADING:
             self._check_slow_speed(task)
+
+    def _cleanup_direct_progress(self, task):
+        """清理任务在直接下载进度字典中的残留条目（正常完成/失败路径）。
+
+        重试/低速重启路径由 _cleanup_and_reset_task 负责，这里覆盖正常终态，
+        避免 _download_progress 随任务完成无限累积。
+        """
+        if task.download_method != "direct":
+            return
+        try:
+            from .downloader_direct import _progress_lock, _download_progress
+            with _progress_lock:
+                for tid in list(task.direct_task_ids):
+                    _download_progress.pop(tid, None)
+        except Exception:
+            logger.exception("[下载] 清理直接下载进度失败: %s", task.work_id)
 
     def _poll_aria2_task(self, task):
         old_gids_count = len(task.gids)
@@ -348,6 +378,7 @@ class DownloadPollMixin:
             self._check_slow_speed(task)
         elif task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             self._slow_speed_tracker.pop(task.work_id, None)
+            self._slow_restart_count.pop(task.work_id, None)
             if task.status == TaskStatus.COMPLETED:
                 self._on_task_completed(task)
 

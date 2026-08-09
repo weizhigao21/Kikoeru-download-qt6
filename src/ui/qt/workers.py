@@ -4,6 +4,8 @@
 QObject + moveToThread 常驻后台线程；信号跨线程自动队列调度回主线程；
 generation 校验丢弃过期批次（沿用 tkinter 版 _nav_generation 机制）。
 """
+from concurrent.futures import ThreadPoolExecutor
+
 from PyQt6.QtCore import QByteArray, QObject, pyqtSignal, pyqtSlot
 
 
@@ -114,35 +116,61 @@ class DataWorker(QObject):
 
 
 class ThumbnailWorker(QObject):
-    """缩略图/详情大图：后台线程下载/磁盘缓存/PIL 解码 → RGB bytes 回主线程重建 QPixmap。"""
+    """缩略图/详情大图：后台线程下载/磁盘缓存/PIL 解码 → RGB bytes 回主线程重建 QPixmap。
+
+    缩略图批次使用固定大小线程池并发加载（默认 4），翻页时通过 generation
+    丢弃过期结果；新批次到达会取消旧批次尚未开始的排队任务。
+    """
     request = pyqtSignal(list, int)                       # (urls, generation)
     thumb_ready = pyqtSignal(int, str, QByteArray, int, int)  # (generation, url, rgb, w, h)
     detail_request = pyqtSignal(str, int)                 # (url, generation)
     detail_ready = pyqtSignal(int, QByteArray, int, int)  # (generation, rgb, w, h)
 
+    _MAX_WORKERS = 4
+
     def __init__(self, image_cache, parent=None):
         super().__init__(parent)
         self._cache = image_cache
         self._cancel_gen = -1
+        self._pool = None
+
+    def _load_one(self, url, generation):
+        """单个缩略图加载任务（在线程池线程执行，emit 线程安全）。"""
+        if generation != self._cancel_gen:
+            return  # 过期批次：直接放弃
+        try:
+            pil = self._cache._load_pil_from_url(url, (180, 180))
+        except Exception:
+            return
+        if pil is None or generation != self._cancel_gen:
+            return
+        try:
+            data, w, h = pil_to_rgb_data(pil)
+            # QByteArray 是 Qt 内置 metatype，queued 跨线程可排队（深拷贝）
+            self.thumb_ready.emit(generation, url, QByteArray(data), w, h)
+        except Exception:
+            pass
 
     @pyqtSlot(list, int)
     def load(self, urls, generation):
         self._cancel_gen = generation
+        # 新批次：取消旧批次尚未开始的排队任务
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        self._pool = ThreadPoolExecutor(max_workers=self._MAX_WORKERS,
+                                        thread_name_prefix="thumb")
         for url in urls:
             if generation != self._cancel_gen:
-                return  # 新批次已到来，放弃剩余旧请求
-            try:
-                pil = self._cache._load_pil_from_url(url, (180, 180))
-            except Exception:
-                continue
-            if pil is None:
-                continue
-            try:
-                data, w, h = pil_to_rgb_data(pil)
-                # QByteArray 是 Qt 内置 metatype，queued 跨线程可排队（深拷贝）
-                self.thumb_ready.emit(generation, url, QByteArray(data), w, h)
-            except Exception:
-                continue
+                self._pool.shutdown(wait=False, cancel_futures=True)
+                return
+            if url:
+                self._pool.submit(self._load_one, url, generation)
+
+    def stop(self):
+        """停止线程池（应用退出时调用；取消排队任务，不等待进行中任务）。"""
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     @pyqtSlot(str, int)
     def load_detail(self, url, generation):

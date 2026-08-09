@@ -1,4 +1,3 @@
-import sqlite3
 import json
 
 from .base import BaseDatabaseManager

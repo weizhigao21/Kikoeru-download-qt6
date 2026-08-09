@@ -18,20 +18,11 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QFileDialog,
 from src import config as _config
 from src.services.translator import get_translator
 from src.ui.qt.qt_fonts import DEFAULT, SMALL, TITLE_BOLD
+from src.utils import format_size as _fmt_size
 
 logger = logging.getLogger(__name__)
 
 _HINT = "#999999"
-
-
-def _fmt_size(size):
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    if size < 1024 * 1024 * 1024:
-        return f"{size / (1024 * 1024):.1f} MB"
-    return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
 class SettingsDialog(QDialog):
@@ -428,6 +419,10 @@ class SettingsDialog(QDialog):
     # ---------- 存储 ----------
     def _get_cache_size(self):
         try:
+            # 复用 ImageCacheManager.get_stats（带 TTL 的磁盘大小缓存），避免全目录遍历
+            if self.image_cache is not None:
+                stats = self.image_cache.get_stats()
+                return _fmt_size(int(stats.get("disk_size_mb", 0) * 1024 * 1024))
             cache_dir = _config.CACHE_DIR
             if not os.path.isdir(cache_dir):
                 return "0 B"
