@@ -56,6 +56,14 @@ def ensure_aria2_running():
             return False
 
 
+# Windows 保留设备名（文件夹名与这些同名会创建失败）
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
 class WorkDownloader:
     def __init__(self, work, download_history):
         self.work = work
@@ -70,13 +78,32 @@ class WorkDownloader:
             extra_chars = _config.FILENAME_FILTER_CHARS
             if extra_chars:
                 illegal_chars |= set(extra_chars)
-            safe_title = "".join(c for c in title if c not in illegal_chars)[:50]
+            # 过滤非法字符 + 控制字符；Windows 会去掉目录名尾部的空格/句点，一并剔除
+            safe_title = "".join(c for c in title if c not in illegal_chars and c >= " ")
+            safe_title = safe_title.rstrip(" .")
+            # Windows 保留设备名兜底：加下划线前缀避免创建失败
+            if safe_title.split(".")[0].upper() in _WINDOWS_RESERVED_NAMES:
+                safe_title = "_" + safe_title
+            # 标题最大长度（设置项可配；0 = 不限制）
+            max_len = _config.FOLDER_TITLE_MAX_LEN
+            if max_len and len(safe_title) > max_len:
+                safe_title = safe_title[:max_len].rstrip(" .")
             # 繁简转换：下载目录名直接生成简体（开启繁简转换时），
             # 避免下载完成后作品文件夹名保持繁体（process_directory 只转文件名不转目录名）
             if _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
                 safe_title = convert_traditional_to_simplified(safe_title)
             folder_name = f"{source_id}-{safe_title}"
-            self._save_dir = os.path.join(_config.DOWNLOAD_DIR, folder_name)
+            save_dir = os.path.join(_config.DOWNLOAD_DIR, folder_name)
+            # Windows 路径长度保护：完整路径超预算时按需截断标题
+            # （260 限制，预留子文件夹与文件名空间；根目录越深预算越小）
+            base_len = len(os.path.abspath(_config.DOWNLOAD_DIR))
+            budget_for_folder = max(40, 200 - base_len)  # 预留 60 给子文件夹+文件名
+            max_title_in_path = budget_for_folder - len(source_id) - 1
+            if max_title_in_path > 0 and len(safe_title) > max_title_in_path:
+                safe_title = safe_title[:max_title_in_path].rstrip(" .")
+                folder_name = f"{source_id}-{safe_title}"
+                save_dir = os.path.join(_config.DOWNLOAD_DIR, folder_name)
+            self._save_dir = save_dir
             os.makedirs(self._save_dir, exist_ok=True)
         return self._save_dir
 

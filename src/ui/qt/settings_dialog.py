@@ -60,6 +60,7 @@ class SettingsDialog(QDialog):
             "ai_thinking_enabled": get("ai_thinking_enabled", True),
             "ai_translate_editable": get("ai_translate_editable", True),
             "filename_filter_chars": get("filename_filter_chars", ""),
+            "folder_title_max_len": get("folder_title_max_len", 120),
             "subtitle_convert_enabled": get("subtitle_convert_enabled", True),
             "auto_flatten_enabled": get("auto_flatten_enabled", True),
             "traditional_to_simplified_enabled": get("traditional_to_simplified_enabled", True),
@@ -215,6 +216,19 @@ class SettingsDialog(QDialog):
         filter_row.addWidget(self._hint("(额外过滤的字符，如 【】「」《》…)"))
         filter_row.addStretch(1)
         grid.addLayout(filter_row, 4, 1)
+
+        # 目录名标题最大长度
+        grid.addWidget(QLabel("目录名标题最大长度:"), 5, 0)
+        title_len_row = QHBoxLayout()
+        title_len_row.setSpacing(8)
+        self.title_len_spin = QSpinBox()
+        self.title_len_spin.setRange(0, 500)
+        self.title_len_spin.setValue(int(v["folder_title_max_len"]))
+        self.title_len_spin.setSuffix(" 字符")
+        title_len_row.addWidget(self.title_len_spin)
+        title_len_row.addWidget(self._hint("(下载文件夹名中标题的最大长度，0 = 不限制)"))
+        title_len_row.addStretch(1)
+        grid.addLayout(title_len_row, 5, 1)
 
         self.auto_flatten_check = QCheckBox("默认启用自动整理文件夹（下载完成后扁平化嵌套目录）")
         self.auto_flatten_check.setChecked(bool(v["auto_flatten_enabled"]))
@@ -475,6 +489,7 @@ class SettingsDialog(QDialog):
         new_ai_thinking = self.ai_thinking_check.isChecked()
         new_ai_editable = self.ai_editable_check.isChecked()
         new_filename_filter = self.filter_edit.text().strip()
+        new_title_max_len = self.title_len_spin.value()
         new_subtitle_convert = self.subtitle_convert_check.isChecked()
         new_auto_flatten = self.auto_flatten_check.isChecked()
         new_t2s = self.t2s_check.isChecked()
@@ -501,6 +516,7 @@ class SettingsDialog(QDialog):
                 "ai_thinking_enabled": new_ai_thinking,
                 "ai_translate_editable": new_ai_editable,
                 "filename_filter_chars": new_filename_filter,
+                "folder_title_max_len": new_title_max_len,
                 "subtitle_convert_enabled": new_subtitle_convert,
                 "auto_flatten_enabled": new_auto_flatten,
                 "traditional_to_simplified_enabled": new_t2s,
@@ -530,6 +546,7 @@ class SettingsDialog(QDialog):
         _config.AI_THINKING_ENABLED = new_ai_thinking
         _config.AI_TRANSLATE_EDITABLE = new_ai_editable
         _config.FILENAME_FILTER_CHARS = new_filename_filter
+        _config.FOLDER_TITLE_MAX_LEN = new_title_max_len
         _config.SUBTITLE_CONVERT_ENABLED = new_subtitle_convert
         _config.AUTO_FLATTEN_ENABLED = new_auto_flatten
         _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED = new_t2s

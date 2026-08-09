@@ -30,6 +30,7 @@ _DEFAULT_CONFIG = {
     "ai_thinking_enabled": True,
     "ai_translate_editable": True,
     "filename_filter_chars": "",
+    "folder_title_max_len": 120,   # 下载目录名中标题的最大字符数（0 = 不限制，仅受 Windows 路径长度保护）
     "slow_speed_threshold": 1,
     "slow_speed_duration": 10,
     "max_slow_restarts": 3,
@@ -68,7 +69,7 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.0.7"
+VERSION = "v2.0.8"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -134,6 +135,7 @@ DIRECT_DOWNLOAD_THREADS = _cfg["direct_download_threads"]
 QUEUE_MODE = _cfg["queue_mode"]
 MAX_CONCURRENT_DOWNLOADS = _cfg["max_concurrent_downloads"]
 FILENAME_FILTER_CHARS = _cfg["filename_filter_chars"]
+FOLDER_TITLE_MAX_LEN = _cfg["folder_title_max_len"]
 SLOW_SPEED_THRESHOLD = _cfg["slow_speed_threshold"]
 SLOW_SPEED_DURATION = _cfg["slow_speed_duration"]
 MAX_SLOW_RESTARTS = _cfg["max_slow_restarts"]
