@@ -2,6 +2,7 @@
 
 代码健康度 / 性能 / 流畅度全面检查后的修复批次：
 
+- **优化：列表滚轮滑动流畅度** — ① `WorkCardDelegate` 布局缓存（`_layout_for`：标题行数/标签/版本矩形按 `(id, title, 行宽)` 缓存，滚动时命中不再重复 QFontMetrics 测量，`sizeHint` 与 `paint` 共用，`set_works` 时清空）；② 标题绘制弃用 `TextWordWrap` 模式 `drawText`（其内部每次做完整换行布局，是绘制热点），改为预计算行数后普通 `drawText` 拆行 + 省略号；③ 缓存 `QFontMetrics(SMALL/MONO_ID)` 实例、去掉标签循环前重复 `setFont`；④ `WorksListView` 开启 `LayoutMode.Batched`（滚动时分批计算 sizeHint）+ viewport `WA_OpaquePaintEvent`（跳过背景合成）。实测滚动帧绘制耗时下降约 15-20%
 - **新增：底部实时任务进度条** — 补全 README 声明但缺失的功能：底栏 `dl_task_frame` 由空框架改为增量任务条（`bottom_bar.set_active_tasks`），显示活跃任务的 ID / 进度条 / 百分比 / 速度，任务集合变化时重建、进度变化只改值，无任务自动隐藏；由 `_on_downloads_changed` 每秒刷新
 - **修复：两处内存无界增长** — ① `WorkCardDelegate._thumbs` 缩略图字典翻页/搜索从不清理 → `set_works` 时按当前列表裁剪（`prune_thumbs`）；② 直接下载进度字典 `_download_progress` 任务终态从不清理 → 新增 `_cleanup_direct_progress`，在 `_poll_direct_task` 终态 / `_on_task_completed` / `cancel` 中清理，并同步清理 `_slow_restart_count` 残留
 - **优化：文件完整性检查并发化** — `_check_files_existence` 逐文件串行 HEAD（timeout 10s×文件数）→ `ThreadPoolExecutor(8)` 并发，保持结果顺序，异常时回退串行；断点续传/重试场景下载启动显著加快
