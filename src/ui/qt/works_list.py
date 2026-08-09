@@ -96,19 +96,8 @@ class WorkCardDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thumbs = {}   # url -> QPixmap（主线程更新）
-        # QFontMetrics 构造开销不小，滚动时每帧会多次测量，统一缓存实例
         self._fm_title = QFontMetrics(BODY)
-        self._fm_small = QFontMetrics(SMALL)
-        self._fm_mono = QFontMetrics(MONO_ID)
         self._downloaded_ids = set()  # 规范化后的已下载 RJ ID（用于版本 ✓ 标记）
-        # 布局缓存：key=(work_id, title, 行宽) → (标题行数, 版本矩形列表, 标签矩形列表)。
-        # 滚动时数据不变，直接命中，避免每帧重复 QFontMetrics 文本测量；
-        # 数据变更（set_works）时整体清空。
-        self._layout_cache = {}
-
-    def clear_layout_cache(self):
-        """数据变化后清空布局缓存（由 WorksListView.set_works 调用）。"""
-        self._layout_cache.clear()
 
     def set_thumb(self, url, pixmap):
         self._thumbs[url] = pixmap
@@ -158,11 +147,11 @@ class WorkCardDelegate(QStyledItemDelegate):
 
     def edition_layout(self, work, rect, extra):
         """计算版本标签绘制位置（与 ID 同行水平摆放，对齐 tkinter id_frame），返回 [(text, color, sid, QRect)]。paint 与命中检测共用。"""
-        fm = self._fm_small
+        fm = QFontMetrics(SMALL)
         out = []
         # 紧跟 ID 文本之后水平摆放（ID 用 MONO_ID 绘制于 y=48 行，已下载含「（已下载）」标注）
         id_text, _ = self.id_display(work)
-        id_w = self._fm_mono.horizontalAdvance(id_text)
+        id_w = QFontMetrics(MONO_ID).horizontalAdvance(id_text)
         x = rect.left() + 8 + self.THUMB_W + 12 + id_w + 12
         y = rect.top() + 48 + extra
         for text, color, sid in self.edition_items(work):
@@ -175,7 +164,7 @@ class WorkCardDelegate(QStyledItemDelegate):
 
     def tag_layout(self, work, rect, extra):
         """计算标签绘制位置，返回 [(tag, QRect)]。paint 与命中检测共用。"""
-        fm = self._fm_small
+        fm = QFontMetrics(SMALL)
         x = rect.left() + 8 + self.THUMB_W + 12
         y = rect.top() + 96 + extra
         h = 22
@@ -187,29 +176,6 @@ class WorkCardDelegate(QStyledItemDelegate):
             out.append((tag, QRect(x, y, w, h)))
             x += w + 6
         return out
-
-    def _layout_for(self, work, index, rect):
-        """带缓存的布局计算：返回 (标题行数, 版本矩形列表, 标签矩形列表)。
-
-        sizeHint 与 paint 共用同一缓存：滚动时每帧直接命中，不再重复
-        QFontMetrics 文本测量（这是列表滚动卡顿的主要开销）。
-        """
-        key = (work.get("id"), work.get("title"), rect.width())
-        cached = self._layout_cache.get(key)
-        if cached is not None:
-            return cached
-        title = self._display_title(work, index)
-        title_w = rect.width() - 8 - self.THUMB_W - 12 - 8
-        lines = self._title_line_count(title, title_w)
-        extra = (lines - 1) * self.TITLE_LINE_H
-        editions = self.edition_layout(work, rect, extra)
-        tags = self.tag_layout(work, rect, extra)
-        result = (lines, tags, editions)
-        # 缓存容量上限（当前页 20 行，留足余量防止极端翻页时无限增长）
-        if len(self._layout_cache) > 200:
-            self._layout_cache.clear()
-        self._layout_cache[key] = result
-        return result
 
     # ---------- 标题换行 ----------
     def _title_line_count(self, text, width):
@@ -237,21 +203,19 @@ class WorkCardDelegate(QStyledItemDelegate):
             return space + 1
         return max(lo, 1)
 
-    def _draw_title(self, painter, rect, text, lines):
-        """标题：≤2 行自动换行（行数由布局缓存预先算出）。
-
-        不使用 TextWordWrap 模式 drawText（其内部每次做完整换行布局，是绘制热点）；
-        1 行直接普通绘制，2 行用二分拆行 + 省略号，均走普通 drawText。
-        """
+    def _draw_title(self, painter, rect, text):
+        """标题：≤2 行自动换行，超过 2 行则第二行尾部省略号。"""
         fm = self._fm_title
         width = rect.width()
-        if not text:
-            return
-        if lines <= 1:
+        br = fm.boundingRect(QRect(0, 0, max(width, 1), 10000),
+                             int(Qt.TextFlag.TextWordWrap), text)
+        lines = max(1, (br.height() + fm.height() - 1) // fm.height())
+        if lines <= 2:
             painter.drawText(rect, int(Qt.AlignmentFlag.AlignLeft
-                                       | Qt.AlignmentFlag.AlignVCenter), text)
+                                       | Qt.AlignmentFlag.AlignVCenter
+                                       | Qt.TextFlag.TextWordWrap), text)
             return
-        # 两行：第一行铺满，第二行省略号
+        # 超过两行：第一行铺满，第二行省略号
         n1 = self._fit_prefix_len(text, width)
         line1 = text[:n1].rstrip()
         line2 = fm.elidedText(text[n1:].lstrip(), Qt.TextElideMode.ElideRight, width)
@@ -277,9 +241,8 @@ class WorkCardDelegate(QStyledItemDelegate):
         h = self.CARD_H
         if isinstance(work, dict):
             width = option.rect.width() if (option.rect.isValid() and option.rect.width() > 0) else 600
-            # 走布局缓存：与 paint 共用测量结果，避免布局阶段重复文本测量
-            lines, _tags, _eds = self._layout_for(work, index, QRect(0, 0, width, 1))
-            if lines > 1:
+            title_w = width - 8 - self.THUMB_W - 12 - 8
+            if self._title_line_count(self._display_title(work, index), title_w) > 1:
                 h += self.TITLE_LINE_H
         return QSize(0, h)
 
@@ -289,10 +252,6 @@ class WorkCardDelegate(QStyledItemDelegate):
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = option.rect
-
-        # 布局（缓存命中：滚动时不再重复 QFontMetrics 测量）
-        lines, tag_rects, edition_rects = self._layout_for(work, index, r)
-        extra = (lines - 1) * self.TITLE_LINE_H
 
         # 背景（hover / 选中 / 默认）
         if option.state & QStyle.StateFlag.State_MouseOver:
@@ -322,11 +281,12 @@ class WorkCardDelegate(QStyledItemDelegate):
         text_left = r.left() + 8 + self.THUMB_W + 12
         title_w = r.right() - text_left - 8
 
-        # 标题（≤2 行自动换行，超长最后一行省略号；行数来自布局缓存）
+        # 标题（≤2 行自动换行，超长最后一行省略号）
         title = self._display_title(work, index)
+        extra = (self._title_line_count(title, title_w) - 1) * self.TITLE_LINE_H
         painter.setFont(BODY)
         painter.setPen(QColor("#333333"))
-        self._draw_title(painter, QRect(text_left, r.top() + 12, title_w, 26 + extra), title, lines)
+        self._draw_title(painter, QRect(text_left, r.top() + 12, title_w, 26 + extra), title)
 
         # ID（等宽字体；已下载 → 绿色 + 括号「已下载」，未下载 → 蓝色）
         id_text, id_color = self.id_display(work)
@@ -337,12 +297,13 @@ class WorkCardDelegate(QStyledItemDelegate):
 
         # 其他语言版本（同 tkinter：已下载绿色✓、未下载紫色，可点击搜索）
         painter.setFont(SMALL)
-        for text, color, _sid, er in edition_rects:
+        for text, color, _sid, er in self.edition_layout(work, r, extra):
             painter.setPen(QColor(color))
             painter.drawText(er, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
 
-        # 标签（圆角矩形；字体与上一步一致，无需重复 setFont）
-        for i, (tag, tr) in enumerate(tag_rects):
+        # 标签（圆角矩形）
+        painter.setFont(SMALL)
+        for i, (tag, tr) in enumerate(self.tag_layout(work, r, extra)):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(TAG_COLORS[i % len(TAG_COLORS)]))
             painter.drawRoundedRect(tr, 5, 5)
@@ -365,11 +326,6 @@ class WorksListView(QListView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setSpacing(2)
-        # viewport 完全不透明（delegate 每行都全幅绘制背景），跳过 Qt 背景合成
-        self.viewport().setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        # 批处理布局：滚动时按批计算 sizeHint，减少滚动过程中的布局重排频率
-        self.setLayoutMode(QListView.LayoutMode.Batched)
-        self.setBatchSize(20)
         # activated 在 Enter 键与双击时都会触发（不同时触发 doubleClicked），
         # 保证键盘 Enter 与鼠标双击走同一条打开下载窗口的路径，且不会重复打开
         self.activated.connect(self._on_activated)
@@ -381,8 +337,6 @@ class WorksListView(QListView):
         """替换列表数据。scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
         局部刷新（详情刷新/隐藏/删除记录）传 False 保持当前滚动位置。"""
         self.model().set_works(works)
-        # 数据变化：清空 delegate 布局缓存（避免旧数据的测量结果错位）
-        self.delegate().clear_layout_cache()
         # 裁剪缩略图缓存到当前列表，防止无界增长
         self.delegate().prune_thumbs(
             w.get("thumbnailCoverUrl") for w in works if w.get("thumbnailCoverUrl"))
