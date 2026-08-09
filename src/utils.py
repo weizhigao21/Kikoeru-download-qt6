@@ -39,3 +39,23 @@ def strip_rj_prefix(rj_id) -> str:
     if not rj_id:
         return ""
     return str(int(_RJ_PREFIX_RE.sub('', str(rj_id)).strip()))
+
+
+def format_size(size) -> str:
+    """字节数 → 人类可读大小字符串（B/KB/MB/GB）。"""
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.2f} GB"
+
+
+def format_duration(seconds) -> str:
+    """秒数 → 人类可读时长字符串（秒/分/小时）。"""
+    if seconds < 60:
+        return f"{int(seconds)}秒"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分{int(seconds % 60)}秒"
+    return f"{int(seconds // 3600)}小时{int((seconds % 3600) // 60)}分"

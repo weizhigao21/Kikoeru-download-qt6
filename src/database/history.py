@@ -53,8 +53,7 @@ class DownloadHistoryManager(BaseDatabaseManager):
             """)
             conn.commit()
 
-    @staticmethod
-    def _parse_tags(tags_str):
+    def _parse_tags(self, tags_str):
         """解析 tags 字段，兼容 JSON 数组和旧版逗号分隔格式。
 
         旧格式：tag1,tag2,tag3（逗号分隔）
@@ -64,7 +63,7 @@ class DownloadHistoryManager(BaseDatabaseManager):
             return []
         # 优先尝试 JSON 解析
         if tags_str.strip().startswith("["):
-            parsed = DownloadHistoryManager._safe_json_load(tags_str, [])
+            parsed = self._safe_json_load(tags_str, [])
             if isinstance(parsed, list):
                 return parsed
         # 回退到旧版逗号分隔格式

@@ -248,8 +248,13 @@ class DetailPanel(QScrollArea):
             self.refresh_btn.setEnabled(True)
             self.refresh_btn.setText("刷新信息")
 
-    def show_work(self, work, is_downloaded):
-        """展示作品详情（封面由 MainWindow 异步驱动，不在此处理）。"""
+    def show_work(self, work, is_downloaded, translated=None):
+        """展示作品详情（封面由 MainWindow 异步驱动，不在此处理）。
+
+        Args:
+            translated: 调用方已持有的译文（如列表批量预取结果）；None 时回退 DB 查询，
+                        避免频繁点击列表项时主线程重复 SQLite 查询。
+        """
         self._work = work
         if work is None:
             self._reset_empty()
@@ -261,17 +266,15 @@ class DetailPanel(QScrollArea):
         self._show_translated = False
 
         work_id = str(work.get("id", ""))
-        if work_id:
+        cached = translated
+        if not cached and work_id:
             cached = self._db.get_translated_title(work_id)
-            if cached:
-                self._translated_title = cached
-                self._show_translated = True
-                self.title_label.setText(cached)
-                self.toggle_btn.setText("原")
-                self.toggle_btn.show()
-            else:
-                self.title_label.setText(title)
-                self.toggle_btn.hide()
+        if cached:
+            self._translated_title = cached
+            self._show_translated = True
+            self.title_label.setText(cached)
+            self.toggle_btn.setText("原")
+            self.toggle_btn.show()
         else:
             self.title_label.setText(title)
             self.toggle_btn.hide()
