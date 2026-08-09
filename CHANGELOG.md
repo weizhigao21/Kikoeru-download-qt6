@@ -1,7 +1,8 @@
-## v2.0.7（未发布）
+## v2.0.7
 
 代码健康度 / 性能 / 流畅度全面检查后的修复批次：
 
+- **优化：滚轮平滑滚动** — 鼠标滚轮事件原本每格离散大跳（约 3 行 470px）并一次性全量重绘，导致滚动"一卡一卡"（拖动滚动条因连续小步 + 增量平移而流畅）。现 `WorksListView` 拦截 `wheelEvent`：把每格滚动量拆成 16ms 定时器分步滚动（每帧 ≤36px，每格 ≈0.8 行 ≈120px），对齐拖动节奏；连续快速滚动剩余量自动累加衔接，触控板（pixelDelta）走 Qt 原生平滑不受影响，顶部/底部边界由滚动条自动钳制。无头测试 7 项通过（方向/分步/累加/边界/触控板/真实滚动路径）
 - **新增：底部实时任务进度条** — 补全 README 声明但缺失的功能：底栏 `dl_task_frame` 由空框架改为增量任务条（`bottom_bar.set_active_tasks`），显示活跃任务的 ID / 进度条 / 百分比 / 速度，任务集合变化时重建、进度变化只改值，无任务自动隐藏；由 `_on_downloads_changed` 每秒刷新
 - **修复：两处内存无界增长** — ① `WorkCardDelegate._thumbs` 缩略图字典翻页/搜索从不清理 → `set_works` 时按当前列表裁剪（`prune_thumbs`）；② 直接下载进度字典 `_download_progress` 任务终态从不清理 → 新增 `_cleanup_direct_progress`，在 `_poll_direct_task` 终态 / `_on_task_completed` / `cancel` 中清理，并同步清理 `_slow_restart_count` 残留
 - **优化：文件完整性检查并发化** — `_check_files_existence` 逐文件串行 HEAD（timeout 10s×文件数）→ `ThreadPoolExecutor(8)` 并发，保持结果顺序，异常时回退串行；断点续传/重试场景下载启动显著加快

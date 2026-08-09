@@ -318,6 +318,13 @@ class WorksListView(QListView):
     # 右键菜单「翻译」子菜单动作：("translate"/"edit"/"retranslate"/"delete", work)
     translationAction = pyqtSignal(str, object)
 
+    # 平滑滚动参数：滚轮每格（120 刻度）滚动的总像素与每帧步长。
+    # 默认 Qt 每格跳 3 行 ≈ 470px 并一次性全量重绘（卡顿主因），
+    # 这里拆成 16ms 间隔的小步滚动（对齐拖动滚动条的节奏）。
+    _WHEEL_PIXELS_PER_STEP = 120   # 每格 ≈ 0.8 行，细腻手感
+    _SMOOTH_STEP = 36              # 每帧最大滚动像素
+    _SMOOTH_INTERVAL_MS = 16       # ≈60fps
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setItemDelegate(WorkCardDelegate(self))
@@ -326,12 +333,46 @@ class WorksListView(QListView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setSpacing(2)
+        # 平滑滚动状态：待滚动像素累计 + 分步定时器
+        self._smooth_remaining = 0
+        self._smooth_timer = QTimer(self)
+        self._smooth_timer.setInterval(self._SMOOTH_INTERVAL_MS)
+        self._smooth_timer.timeout.connect(self._smooth_step)
         # activated 在 Enter 键与双击时都会触发（不同时触发 doubleClicked），
         # 保证键盘 Enter 与鼠标双击走同一条打开下载窗口的路径，且不会重复打开
         self.activated.connect(self._on_activated)
         # 右键菜单
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
+
+    # ---------- 平滑滚动 ----------
+    def wheelEvent(self, event):
+        """把鼠标滚轮的离散大跳转换为连续小步滚动（触控板 pixelDelta 走原生平滑）。"""
+        pd = event.pixelDelta()
+        if not pd.isNull() and (pd.x() or pd.y()):
+            # 触控板：Qt 原生已按像素平滑滚动，直接交给父类
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+        # 累计本次滚轮应滚动的总像素（正=向上滚动）
+        self._smooth_remaining += -delta / 120 * self._WHEEL_PIXELS_PER_STEP
+        if not self._smooth_timer.isActive():
+            self._smooth_timer.start()
+        event.accept()
+
+    def _smooth_step(self):
+        """分步滚动：每帧最多滚 _SMOOTH_STEP 像素，对齐拖动滚动条的增量平移节奏。"""
+        if abs(self._smooth_remaining) < 0.5:
+            self._smooth_remaining = 0
+            self._smooth_timer.stop()
+            return
+        step = max(-self._SMOOTH_STEP, min(self._SMOOTH_STEP, self._smooth_remaining))
+        self._smooth_remaining -= step
+        bar = self.verticalScrollBar()
+        bar.setValue(bar.value() + int(step))
 
     def set_works(self, works, scroll_to_top=False):
         """替换列表数据。scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
