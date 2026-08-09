@@ -100,22 +100,23 @@ class _InFlight:
 _inflight = _InFlight()
 
 
-def _fetch_or_dedup(key, fetcher, cache=None):
-    """并发去重 + 结果缓存。cache 为注入的缓存实例（测试用），默认全局 _cache。"""
-    c = cache if cache is not None else _cache
-    cached = c.get(key)
+def _fetch_or_dedup(key, fetcher):
+    cached = _cache.get(key)
     if cached is not None:
         return cached
     result = _inflight.dedup(key, fetcher)
-    # fetcher 成功时已通过 c.put 缓存结果，这里直接返回其返回值
+    # fetcher 成功时已通过 _cache.put 缓存结果，这里取缓存保持返回值一致
+    if result is not None:
+        cached_result = _cache.get(key)
+        if cached_result is not None:
+            return cached_result
     return result
 
 
-def _request_with_retry(method, url, max_retries=MAX_RETRIES, session=None, **kwargs):
-    s = session if session is not None else _session
+def _request_with_retry(method, url, max_retries=MAX_RETRIES, **kwargs):
     for attempt in range(max_retries):
         try:
-            response = s.request(method, url, timeout=15, **kwargs)
+            response = _session.request(method, url, timeout=15, **kwargs)
             if response.status_code == 200:
                 return response.json()
             if response.status_code == 404:
@@ -159,10 +160,9 @@ def _extract_total(data) -> int:
     return 0
 
 
-def _fetch_works_page_impl(key_prefix, page, page_size, cache=None, session=None):
+def _fetch_works_page_impl(key_prefix, page, page_size):
     """推荐作品 / 最新收录 共用的作品列表获取实现（两者请求 URL 和参数完全相同）。"""
     key = _cache_key(key_prefix, page, page_size)
-    c = cache if cache is not None else _cache
 
     def do_fetch():
         url = f"{API_BASE_URL}/works"
@@ -171,7 +171,7 @@ def _fetch_works_page_impl(key_prefix, page, page_size, cache=None, session=None
             "pageSize": page_size,
             "subtitle": "0"
         }
-        data = _request_with_retry("GET", url, params=params, session=session)
+        data = _request_with_retry("GET", url, params=params)
         if data is None:
             result = ([], 1)
         elif isinstance(data, list):
@@ -183,72 +183,67 @@ def _fetch_works_page_impl(key_prefix, page, page_size, cache=None, session=None
             total = _extract_total(data)
             max_page = max(1, (total + page_size - 1) // page_size) if total else page + 1
             result = (works, max_page)
-        c.put(key, result)
+        _cache.put(key, result)
         return result
 
-    return _fetch_or_dedup(key, do_fetch, cache)
+    return _fetch_or_dedup(key, do_fetch)
 
 
-def fetch_works_page(page: int, page_size: int = WORKS_PER_PAGE, cache=None, session=None) -> tuple:
-    return _fetch_works_page_impl("works", page, page_size, cache, session)
+def fetch_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
+    return _fetch_works_page_impl("works", page, page_size)
 
 
-def fetch_latest_works_page(page: int, page_size: int = WORKS_PER_PAGE, cache=None, session=None) -> tuple:
-    return _fetch_works_page_impl("latest", page, page_size, cache, session)
+def fetch_latest_works_page(page: int, page_size: int = WORKS_PER_PAGE) -> tuple:
+    return _fetch_works_page_impl("latest", page, page_size)
 
 
-def fetch_work_detail(rj_id, cache=None, session=None):
+def fetch_work_detail(rj_id):
     key = _cache_key("detail", rj_id)
-    c = cache if cache is not None else _cache
 
     def do_fetch():
         rid = strip_rj_prefix(rj_id)
         url = f"{API_BASE_URL}/workInfo/{rid}"
         params = {"v": "2"}
-        data = _request_with_retry("GET", url, params=params, session=session)
+        data = _request_with_retry("GET", url, params=params)
         if data:
-            c.put(key, data)
+            _cache.put(key, data)
         return data
 
-    return _fetch_or_dedup(key, do_fetch, cache)
+    return _fetch_or_dedup(key, do_fetch)
 
 
-def fetch_tracks(rj_id, cache=None, session=None):
+def fetch_tracks(rj_id):
     key = _cache_key("tracks", rj_id)
-    c = cache if cache is not None else _cache
 
     def do_fetch():
         rid = strip_rj_prefix(rj_id)
         url = f"{API_BASE_URL}/tracks/{rid}"
         params = {"v": "2"}
-        data = _request_with_retry("GET", url, params=params, session=session)
+        data = _request_with_retry("GET", url, params=params)
         if data:
-            c.put(key, data)
+            _cache.put(key, data)
         return data
 
-    return _fetch_or_dedup(key, do_fetch, cache)
+    return _fetch_or_dedup(key, do_fetch)
 
 
-def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE, circle: str = None,
-                  cache=None, session=None):
+def search_by_tag(tags, page: int = 1, page_size: int = WORKS_PER_PAGE, circle: str = None):
     """按标签搜索；circle 非空时与厂商组合过滤（`$circle:xx$ $tag:yy$` 空格分隔，实测有效）。"""
     encoded_tag = _encode_tags(tags, circle)
     key = _cache_key("tag", encoded_tag, page, page_size)
-    return _search_impl(key, encoded_tag, page, page_size, cache, session)
+    return _search_impl(key, encoded_tag, page, page_size)
 
 
-def search_by_keyword(keyword, page: int = 1, page_size: int = WORKS_PER_PAGE,
-                      cache=None, session=None):
+def search_by_keyword(keyword, page: int = 1, page_size: int = WORKS_PER_PAGE):
     encoded_keyword = requests.utils.quote(keyword)
     key = _cache_key("keyword", encoded_keyword, page, page_size)
-    return _search_impl(key, encoded_keyword, page, page_size, cache, session)
+    return _search_impl(key, encoded_keyword, page, page_size)
 
 
-def search_by_circle(circle_name, page: int = 1, page_size: int = WORKS_PER_PAGE,
-                     cache=None, session=None):
+def search_by_circle(circle_name, page: int = 1, page_size: int = WORKS_PER_PAGE):
     encoded_name = requests.utils.quote(f"$circle:{circle_name}$")
     key = _cache_key("circle", circle_name, page, page_size)
-    return _search_impl(key, encoded_name, page, page_size, cache, session)
+    return _search_impl(key, encoded_name, page, page_size)
 
 
 def _parse_search_response(data, page, page_size):
@@ -281,10 +276,8 @@ def _parse_search_response(data, page, page_size):
     return ([], 1)
 
 
-def _search_impl(key, encoded_query, page, page_size, cache=None, session=None):
+def _search_impl(key, encoded_query, page, page_size):
     """tag/keyword/circle 三种搜索共用的请求实现。"""
-    c = cache if cache is not None else _cache
-
     def do_fetch():
         url = f"{API_BASE_URL}/search/{encoded_query}"
         params = {
@@ -293,12 +286,12 @@ def _search_impl(key, encoded_query, page, page_size, cache=None, session=None):
             "subtitle": "0",
             "djin": "false"
         }
-        data = _request_with_retry("GET", url, params=params, session=session)
+        data = _request_with_retry("GET", url, params=params)
         result = _parse_search_response(data, page, page_size)
-        c.put(key, result)
+        _cache.put(key, result)
         return result
 
-    return _fetch_or_dedup(key, do_fetch, cache)
+    return _fetch_or_dedup(key, do_fetch)
 
 
 def _encode_tags(tags, circle: str = None):
@@ -326,8 +319,9 @@ def clear_api_cache():
 
 
 class APIClient:
-    """API 客户端薄封装。默认使用全局 session/缓存/去重；可选注入 session 和 cache
-    以便测试替换——注入的实例会真正生效（读取与写入均走注入实例）。
+    """API 客户端薄封装。所有方法委托到模块级函数，共享全局 session/缓存/去重。
+
+    可选注入 session 和 cache 以便测试替换；默认使用模块级单例。
     """
 
     def __init__(self, session=None, cache=None):
@@ -335,25 +329,25 @@ class APIClient:
         self._cache = cache if cache is not None else _cache
 
     def fetch_works_page(self, page, page_size=WORKS_PER_PAGE):
-        return fetch_works_page(page, page_size, self._cache, self._session)
+        return fetch_works_page(page, page_size)
 
     def fetch_latest_works_page(self, page, page_size=WORKS_PER_PAGE):
-        return fetch_latest_works_page(page, page_size, self._cache, self._session)
+        return fetch_latest_works_page(page, page_size)
 
     def fetch_work_detail(self, rj_id):
-        return fetch_work_detail(rj_id, self._cache, self._session)
+        return fetch_work_detail(rj_id)
 
     def fetch_tracks(self, rj_id):
-        return fetch_tracks(rj_id, self._cache, self._session)
+        return fetch_tracks(rj_id)
 
     def search_by_tag(self, tags, page=1, page_size=WORKS_PER_PAGE, circle=None):
-        return search_by_tag(tags, page, page_size, circle, self._cache, self._session)
+        return search_by_tag(tags, page, page_size, circle)
 
     def search_by_keyword(self, keyword, page=1, page_size=WORKS_PER_PAGE):
-        return search_by_keyword(keyword, page, page_size, self._cache, self._session)
+        return search_by_keyword(keyword, page, page_size)
 
     def search_by_circle(self, circle_name, page=1, page_size=WORKS_PER_PAGE):
-        return search_by_circle(circle_name, page, page_size, self._cache, self._session)
+        return search_by_circle(circle_name, page, page_size)
 
 
 def get_api_client():

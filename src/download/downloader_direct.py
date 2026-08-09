@@ -218,11 +218,6 @@ class DirectDownloader:
 
             except requests.exceptions.HTTPError as e:
                 if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
-                    # 关闭未消费的流式响应，避免连接句柄累积
-                    try:
-                        e.response.close()
-                    except Exception:
-                        pass
                     wait_time = _handle_429(e.response, attempt, max_retries)
                     time.sleep(wait_time)
                     continue
@@ -243,6 +238,16 @@ class DirectDownloader:
 
     def cancel(self):
         self._cancelled = True
+
+
+def get_download_progress(task_id):
+    with _progress_lock:
+        return _download_progress.get(task_id, {})
+
+
+def clear_download_progress(task_id):
+    with _progress_lock:
+        _download_progress.pop(task_id, None)
 
 
 def poll_direct_progress(task_ids):

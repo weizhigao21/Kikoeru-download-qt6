@@ -44,8 +44,8 @@ def ensure_aria2_running():
                 [aria2_exe],
                 cwd=_config.ARIA2_DIR,
             )
-            for _ in range(25):
-                time.sleep(0.2)
+            for _ in range(20):
+                time.sleep(0.5)
                 if check_aria2_port():
                     logger.info("[Aria2] 已就绪")
                     return True
@@ -270,6 +270,10 @@ def poll_download_progress(gids):
     except Exception:
         logger.exception("[Aria2] 轮询异常")
         return 0, 0, 0, False
+
+
+def get_downloader(work, download_history) -> WorkDownloader:
+    return WorkDownloader(work, download_history)
 
 
 def purge_aria2_downloads():

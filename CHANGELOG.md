@@ -1,22 +1,3 @@
-## v2.0.7（未发布）
-
-代码健康度 / 性能 / 流畅度全面检查后的修复批次：
-
-- **新增：底部实时任务进度条** — 补全 README 声明但缺失的功能：底栏 `dl_task_frame` 由空框架改为增量任务条（`bottom_bar.set_active_tasks`），显示活跃任务的 ID / 进度条 / 百分比 / 速度，任务集合变化时重建、进度变化只改值，无任务自动隐藏；由 `_on_downloads_changed` 每秒刷新
-- **修复：两处内存无界增长** — ① `WorkCardDelegate._thumbs` 缩略图字典翻页/搜索从不清理 → `set_works` 时按当前列表裁剪（`prune_thumbs`）；② 直接下载进度字典 `_download_progress` 任务终态从不清理 → 新增 `_cleanup_direct_progress`，在 `_poll_direct_task` 终态 / `_on_task_completed` / `cancel` 中清理，并同步清理 `_slow_restart_count` 残留
-- **优化：文件完整性检查并发化** — `_check_files_existence` 逐文件串行 HEAD（timeout 10s×文件数）→ `ThreadPoolExecutor(8)` 并发，保持结果顺序，异常时回退串行；断点续传/重试场景下载启动显著加快
-- **优化：缩略图并发加载** — `ThumbnailWorker.load` 单线程串行下载 20 张图 → 4 线程池并发（generation 过期校验保留，新批次取消旧排队任务），翻页首屏缩略图出现更快；新增 `stop()` 供退出时关闭线程池
-- **优化：文件夹整理移出轮询线程** — `_flatten_folders`（含失败重试 sleep）原在全局轮询线程同步执行、阻塞其他任务进度轮询 → 改为独立后台线程（`_flatten_worker` + `_flattening` 互斥标志）
-- **优化：缩略图重绘合并** — `_on_thumb_ready` 每张图触发一次全量 `viewport().update()` → `QTimer.singleShot(0)` 合并同一帧内的多次就绪（`_flush_thumb_repaint`）
-- **优化：下载 tab 列表缓存** — `_load_downloads` 同排序且数据未变化时直接复用 `_all_downloaded_works` 本地展示，不再每次切 tab 全量重查库；删除记录 / 下载完成 / 刷新时显式失效，排序切换同步缓存键
-- **修复：退出时线程销毁崩溃风险** — `closeEvent` 中 `QThread.wait(2000)` 超时后线程仍运行即随窗口析构 → 新增 `_stop_worker_thread`：quit + wait(3000)，超时则 detach（`setParent(None)` + `finished`→`deleteLater` + 持有引用），避免 "QThread: Destroyed while thread is still running"
-- **修复：APIClient 依赖注入形同虚设** — 注入的 `session`/`cache` 从未生效（方法委托到模块级全局）→ 模块级 fetch 函数增加 `cache`/`session` 可选参数并透传（读取与写入均走注入实例），README 声称的"依赖注入便于测试"现在真实有效
-- **修复：版本号不一致** — `config.VERSION` 仍为 v2.0.5（窗口标题/启动画面显示旧版本）→ 同步为 v2.0.7
-- **优化：详情面板复用译文缓存** — `show_work(work, is_downloaded, translated=None)` 接收调用方已持有的译文，未传时才回退 DB 查询，避免频繁点击列表项时主线程重复 SQLite 查询
-- **清理：tkinter 遗留死代码** — `cache.py` 删除 `get/get_image/save_image/save_thumbnail/get_thumbnail/load_from_url/is_cached/preload_thumbnails/_preload_worker/_resize_thumbnail` 等约 200 行 ImageTk 方法（仅归档版 legacy_tk 使用），并让磁盘超限清理由实际加载路径 `_load_pil_from_url` 触发
-- **清理：其他死代码** — 删除 `get_downloader`（downloader.py）、`get_download_progress`/`clear_download_progress`（downloader_direct.py）及 `__init__.py` 相应导出；`src/__init__.py` 移除无人使用的 `API_URL`/`DEFAULT_PAYLOAD` 导出
-- **其他低风险修复** — ① `database.py get_work_detail_cached` 消除 `SELECT *`（仅取 vas/circle_data 两列）；② `format_size`/`format_duration` 提取到 `src/utils.py` 统一复用；③ `get_stats` 磁盘大小带 30s TTL 缓存，设置页复用不再全目录遍历；④ Aria2 启动探测 10s → 5s（0.2s 间隔）；⑤ 直接下载 429 重试分支关闭流式 response 防连接泄漏；⑥ `TracksModel.parent()` 线性扫描改行号查表；⑦ `history._parse_tags` 类名静态引用改 `self`；⑧ 删除 4 处未使用导入（pending/database sqlite3、download_dialog SMALL/TITLE_BOLD、works_list QPixmap）
-
 ## v2.0.6
 
 - **修复：翻页/搜索后滚动条不回到顶部** — `WorksListModel.set_works` 全量重建 model 后 QListView 会按 index 维持旧滚动位置；新增 `WorksListView.set_works(works, scroll_to_top)` 统一入口（翻页/搜索/刷新传 `True`，延迟一帧 `scrollToTop`），详情刷新 / 隐藏作品 / 删除记录等局部刷新场景传 `False` 保持滚动位置（`main_window.py` 275/487/809/851 行调用点已按场景调整）

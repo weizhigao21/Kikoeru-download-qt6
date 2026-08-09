@@ -53,7 +53,6 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         self._cleanup_counter = 0
         self._last_cleanup_time = time.time()
         self._pending_flatten: list[str] = []
-        self._flattening = False
         self._poll_wake_event = threading.Event()
 
     def set_download_history(self, dh):
@@ -127,14 +126,6 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
                 except Exception:
                     pass
             else:
-                # 取消时同步清理直接下载进度条目，避免残留
-                try:
-                    from .downloader_direct import _progress_lock, _download_progress
-                    with _progress_lock:
-                        for tid in task.direct_task_ids:
-                            _download_progress.pop(tid, None)
-                except Exception:
-                    pass
                 task.direct_task_ids.clear()
 
         with self._queue_lock:

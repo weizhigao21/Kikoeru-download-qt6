@@ -71,12 +71,6 @@ class MainWindow(QMainWindow):
         self._downloads_changed.connect(self._on_downloads_changed)
         self.dl_manager.add_observer(self._downloads_changed.emit)
         self._last_done_ids = None
-        # 下载 tab 列表缓存：同排序且数据未变化时复用，避免每次切 tab 重复查库
-        self._downloads_cache_sort = None
-        # 关闭时被分离的线程引用（wait 超时后 detach，避免销毁运行中的线程）
-        self._detached_threads = []
-        # 缩略图重绘合并标记（同一帧内多次就绪只重绘一次）
-        self._thumb_repaint_pending = False
 
         # 翻译服务初始化（对齐 tkinter 版：把 config 同步给 translator 单例，
         # 否则 AI_API_KEY 等配置未生效，右键翻译会报"未配置 API Key"）。
@@ -270,7 +264,6 @@ class MainWindow(QMainWindow):
         self._clear_search_state()
         self.search_history.clear()
         if self.current_tab == "download":
-            self._downloads_cache_sort = None  # 强制重新查库
             self._load_downloads()
         else:
             self._load_data(1)
@@ -395,13 +388,6 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         self.delegate.set_thumb(url, pix)
-        # 合并同一帧内的多次就绪：只触发一次全量重绘，避免 20 张图连续 update
-        if not self._thumb_repaint_pending:
-            self._thumb_repaint_pending = True
-            QTimer.singleShot(0, self._flush_thumb_repaint)
-
-    def _flush_thumb_repaint(self):
-        self._thumb_repaint_pending = False
         self.list_view.viewport().update()
 
     def _on_detail_ready(self, gen, rgb, w, h):
@@ -435,9 +421,7 @@ class MainWindow(QMainWindow):
     # ---------- 详情 ----------
     def _show_detail(self, work):
         is_downloaded = self._is_downloaded(work)
-        # 复用列表批量预取的译文，避免主线程重复查库
-        self.detail_panel.show_work(work, is_downloaded,
-                                    self.model.translated_title(work) or None)
+        self.detail_panel.show_work(work, is_downloaded)
 
         url = work.get("mainCoverUrl") or work.get("thumbnailCoverUrl") or ""
         if url:
@@ -472,8 +456,7 @@ class MainWindow(QMainWindow):
             if self.current_tab == "recommend":
                 self.db.update_works_cache(work, self.current_page)
             # 只刷新详情面板，避免重建 model 导致滚动位置重置
-            self.detail_panel.show_work(work, self._is_downloaded(work),
-                                        self.model.translated_title(work) or None)
+            self.detail_panel.show_work(work, self._is_downloaded(work))
 
     def _apply_full_refresh(self, work, data):
         """刷新信息：全量更新 work 并写回缓存。"""
@@ -768,14 +751,8 @@ class MainWindow(QMainWindow):
     def _load_downloads(self):
         self._nav_generation += 1
         gen = self._nav_generation
-        sort_key = self.sort_map.get(self.top_bar.sort_combo.currentText(), "download_time_desc")
-        # 缓存：同排序且已有完整列表时直接本地展示，避免每次切 tab 重复全量查库
-        if self._all_downloaded_works and self._downloads_cache_sort == sort_key:
-            self._downloaded_search_result = None
-            self._show_downloaded_page()
-            return
-        self._downloads_cache_sort = sort_key
         self._downloaded_search_result = None
+        sort_key = self.sort_map.get(self.top_bar.sort_combo.currentText(), "download_time_desc")
         self._set_status("正在加载已下载作品信息...")
         self._data_worker.downloads.emit(sort_key, gen)
 
@@ -797,8 +774,6 @@ class MainWindow(QMainWindow):
         if self.current_tab == "download" and self._all_downloaded_works:
             sort_key = self.sort_map.get(self.top_bar.sort_combo.currentText(), "download_time_desc")
             self._all_downloaded_works = self._sort_works(self._all_downloaded_works, sort_key)
-            # 同步缓存键：切 tab 回来时同排序直接复用本地数据，无需重新查库
-            self._downloads_cache_sort = sort_key
             # 本地搜索状态：搜索结果同样按当前排序刷新
             if self._downloaded_search_result is not None:
                 self._downloaded_search_result = self._sort_works(self._downloaded_search_result, sort_key)
@@ -869,15 +844,13 @@ class MainWindow(QMainWindow):
         self._update_downloaded_count()
         self._set_status(f"✓ 已删除下载记录: {title[:20]}...")
         if self.current_tab == "download":
-            self._downloads_cache_sort = None  # 删除记录后强制重新查库
             self._load_downloads()
         else:
             # 重新过滤当前列表（若该作品已不在列表，无需处理）
             if work in self.works:
                 self.list_view.set_works(self.works)
                 self._sync_translations()
-            self.detail_panel.show_work(work, self._is_downloaded(work),
-                                        self.model.translated_title(work) or None)
+            self.detail_panel.show_work(work, self._is_downloaded(work))
 
     # ---------- 交互 ----------
     def _on_go_page(self):
@@ -1002,8 +975,7 @@ class MainWindow(QMainWindow):
             self.model.dataChanged.emit(idx, idx, [])
         # 刷新详情面板（若正显示该作品）
         if self.detail_panel.current_work() is work:
-            self.detail_panel.show_work(work, self._is_downloaded(work),
-                                        self.model.translated_title(work) or None)
+            self.detail_panel.show_work(work, self._is_downloaded(work))
         self._set_status("✓ 已删除翻译")
 
     def _on_translate_result(self, original, work, translated):
@@ -1031,8 +1003,7 @@ class MainWindow(QMainWindow):
                 self.model.dataChanged.emit(idx, idx, [])
             # 刷新详情面板（若正显示该作品）
             if self.detail_panel.current_work() is work:
-                self.detail_panel.show_work(work, self._is_downloaded(work),
-                                            self.model.translated_title(work) or None)
+                self.detail_panel.show_work(work, self._is_downloaded(work))
         except Exception as e:
             logger.exception("应用翻译失败: %s", e)
             self._set_status(f"翻译应用失败：{e}")
@@ -1050,13 +1021,8 @@ class MainWindow(QMainWindow):
     def _on_downloads_changed(self):
         """observer 由轮询线程触发 → pyqtSignal queued 回主线程。
 
-        1) 刷新底部任务条（任务集合变化重建、进度变化只改值）；
-        2) 仅当完成/失败任务集合变化时才重查已下载 ID（避免每次进度更新打 DB）。
+        仅当完成/失败任务集合变化时才重查已下载 ID（避免每次进度更新打 DB）。
         """
-        try:
-            self.bottom_bar.set_active_tasks(self.dl_manager.get_all_tasks())
-        except Exception:
-            logger.exception("刷新底部任务条失败")
         try:
             done_ids = {t.work_id for t in self.dl_manager.get_all_tasks()
                         if t.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)}
@@ -1065,8 +1031,6 @@ class MainWindow(QMainWindow):
         if done_ids != self._last_done_ids:
             self._last_done_ids = done_ids
             self._load_downloaded_ids()
-            # 下载结果变化 → 下载 tab 列表缓存失效
-            self._downloads_cache_sort = None
 
     def _open_download_dialog(self, work):
         """双击作品 → 下载选择对话框（每次新建，完成后清理引用）。
@@ -1129,35 +1093,17 @@ class MainWindow(QMainWindow):
         return self.bottom_bar.page_entry
 
     # ---------- 关闭清理 ----------
-    def _stop_worker_thread(self, thread):
-        """安全停止后台线程：quit + 有限等待；超时则 detach 让线程自然结束，
-        避免 QThread 随窗口析构销毁仍在运行的线程（"QThread: Destroyed while
-        thread is still running" 崩溃）。"""
-        thread.quit()
-        if thread.wait(3000):
-            return
-        # 线程仍在运行（如 API 请求中）：解除父子关系并保持引用，
-        # 其 finished 后自动 deleteLater 回收
-        try:
-            thread.setParent(None)
-        except Exception:
-            pass
-        thread.finished.connect(thread.deleteLater)
-        self._detached_threads.append(thread)
-
     def closeEvent(self, event):
         try:
             self.dl_manager.remove_observer(self._downloads_changed.emit)
         except Exception:
             pass
-        # 通知缩略图 worker 立即停止当前批次（generation=-1 + 线程池关闭）
-        try:
-            self._thumb_worker.request.emit([], -1)
-            self._thumb_worker.stop()
-        except Exception:
-            pass
-        self._stop_worker_thread(self._data_thread)
-        self._stop_worker_thread(self._thumb_thread)
+        if self._data_thread is not None:
+            self._data_thread.quit()
+            self._data_thread.wait(2000)
+        if self._thumb_thread is not None:
+            self._thumb_thread.quit()
+            self._thumb_thread.wait(2000)
         for mgr in (self.db, self.download_history, self.pending_task_db, self.tracks_db):
             try:
                 mgr.close_all()

@@ -5,7 +5,7 @@ Model 只持有数据（QAbstractListModel），Delegate 用 QPainter 全绘制�
 Qt 内置虚拟化——仅实例化可见行，widget 数量恒定，滚动流畅。
 """
 from PyQt6.QtCore import Qt, QAbstractListModel, QModelIndex, QRect, QSize, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFontMetrics, QPainter
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QListView, QMenu,
                              QStyledItemDelegate, QStyle)
 
@@ -101,16 +101,6 @@ class WorkCardDelegate(QStyledItemDelegate):
 
     def set_thumb(self, url, pixmap):
         self._thumbs[url] = pixmap
-
-    def prune_thumbs(self, keep_urls):
-        """裁剪缩略图缓存：只保留当前列表的 URL，防止翻页累积导致无界增长。
-
-        被清理的 URL 在 ImageCacheManager 内存/磁盘缓存中仍可快速重取。
-        """
-        keep = set(keep_urls)
-        stale = [url for url in self._thumbs if url not in keep]
-        for url in stale:
-            del self._thumbs[url]
 
     def set_downloaded_ids(self, ids):
         self._downloaded_ids = set(ids)
@@ -337,9 +327,6 @@ class WorksListView(QListView):
         """替换列表数据。scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
         局部刷新（详情刷新/隐藏/删除记录）传 False 保持当前滚动位置。"""
         self.model().set_works(works)
-        # 裁剪缩略图缓存到当前列表，防止无界增长
-        self.delegate().prune_thumbs(
-            w.get("thumbnailCoverUrl") for w in works if w.get("thumbnailCoverUrl"))
         if scroll_to_top:
             # model reset 后 view 布局可能下一帧才稳定，延迟一帧保证滚动生效
             QTimer.singleShot(0, self.scrollToTop)

@@ -1,3 +1,4 @@
+import sqlite3
 import json
 
 from .base import BaseDatabaseManager
@@ -114,16 +115,17 @@ class DatabaseManager(BaseDatabaseManager):
 
     def get_work_detail_cached(self, work_id: str) -> dict:
         with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            # 明确指定列名，避免 SELECT * 冗余读取（仅需 vas / circle_data 两列；
-            # 旧库缺失列已由 _init_db 的 ALTER TABLE 迁移补齐）
-            cursor.execute("SELECT vas, circle_data FROM works WHERE work_id = ? LIMIT 1", (work_id,))
+            cursor.execute("SELECT * FROM works WHERE work_id = ? LIMIT 1", (work_id,))
             row = cursor.fetchone()
             if not row:
                 return None
+            vas_str = row["vas"] if "vas" in row.keys() else ""
+            circle_str = row["circle_data"] if "circle_data" in row.keys() else ""
             # 使用 _safe_json_load 容错处理损坏的 JSON，与同类其他方法一致
-            vas = self._safe_json_load(row[0], [])
-            circle = self._safe_json_load(row[1], {})
+            vas = self._safe_json_load(vas_str, [])
+            circle = self._safe_json_load(circle_str, {})
             if vas or (circle and isinstance(circle, dict) and circle.get("name")):
                 return {"vas": vas, "circle": circle}
             return None

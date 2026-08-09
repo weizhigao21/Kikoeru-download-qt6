@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QMessageBox, QPushBut
 
 from src.api_client import get_api_client
 from src.download.manager import DownloadManager
-from src.utils import format_duration, format_size, normalize_rj_id
-from src.ui.qt.qt_fonts import DEFAULT
+from src.utils import normalize_rj_id
+from src.ui.qt.qt_fonts import DEFAULT, SMALL, TITLE_BOLD
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,24 @@ _ICONS = {
 }
 
 
+def format_size(size):
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.2f} GB"
+
+
+def format_duration(seconds):
+    if seconds < 60:
+        return f"{int(seconds)}秒"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分{int(seconds % 60)}秒"
+    return f"{int(seconds // 3600)}小时{int((seconds % 3600) // 60)}分"
+
+
 class TracksModel(QAbstractItemModel):
     """tracks JSON（list/dict）→ 树模型；节点 dict 作为 internalPointer，父映射预建。"""
 
@@ -36,7 +54,6 @@ class TracksModel(QAbstractItemModel):
         super().__init__(parent)
         self._root: list = []
         self._parent_map: dict = {}  # id(node) -> parent node or None
-        self._row_map: dict = {}     # id(node) -> 在兄弟列表中的行号（parent() 查表用）
 
     def _children(self, node):
         if node is None:
@@ -51,14 +68,12 @@ class TracksModel(QAbstractItemModel):
             self._root = list(data or [])
 
         def walk(nodes, parent):
-            for i, n in enumerate(nodes):
+            for n in nodes:
                 self._parent_map[id(n)] = parent
-                self._row_map[id(n)] = i
                 if isinstance(n, dict) and n.get("children"):
                     walk(n["children"], n)
 
         self._parent_map = {}
-        self._row_map = {}
         walk(self._root, None)
         self.endResetModel()
 
@@ -74,8 +89,9 @@ class TracksModel(QAbstractItemModel):
         p = self._parent_map.get(id(index.internalPointer()))
         if p is None:
             return QModelIndex()
-        # 预建行号映射，避免大文件树下线性扫描找父节点行号
-        row = self._row_map.get(id(p), 0)
+        gp = self._parent_map.get(id(p))
+        siblings = self._children(gp)
+        row = next((i for i, s in enumerate(siblings) if s is p), 0)
         return self.createIndex(row, 0, p)
 
     def rowCount(self, parent=QModelIndex()):

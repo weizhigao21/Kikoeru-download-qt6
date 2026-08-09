@@ -41,14 +41,13 @@ class DownloadCoreMixin:
     def _check_files_existence(self, files, save_dir):
         """检查文件列表中哪些已完整下载，返回 (待下载列表, 已跳过数量)。
 
-        _submit_aria2 和 _submit_direct 共用的文件存在性检查逻辑。
-        并发执行远程大小 HEAD 校验（默认 8 并发），避免逐文件串行网络请求
-        阻塞下载启动。
+        _submit_aria2 和 _submit_direct 共用的文件存在性检查逻辑（v1.50.0 声称已提取但实际未做）。
         """
-        from concurrent.futures import ThreadPoolExecutor
         from .downloader_direct import check_file_exists
+        files_to_download = []
+        skipped_count = 0
 
-        def check_one(file_info):
+        for file_info in files:
             filename = file_info.get("filename", "未命名")
             subfolder = file_info.get("subfolder", "")
             url = file_info.get("url", "")
@@ -56,26 +55,11 @@ class DownloadCoreMixin:
             if subfolder:
                 file_dir = os.path.join(save_dir, subfolder)
             filepath = os.path.join(file_dir, filename)
-            return file_info, check_file_exists(filepath, url)
 
-        results = []
-        try:
-            with ThreadPoolExecutor(max_workers=8, thread_name_prefix="filecheck") as ex:
-                for file_info, (is_complete, _) in ex.map(check_one, files):
-                    results.append((file_info, is_complete))
-        except Exception:
-            # 线程池异常兜底：退回串行检查，保证不阻塞提交流程
-            logger.exception("[下载] 并发完整性检查失败，退回串行")
-            results = [(fi, check_file_exists(
-                os.path.join(save_dir, fi.get("subfolder", ""), fi.get("filename", "未命名")),
-                fi.get("url", ""))[0]) for fi in files]
-
-        files_to_download = []
-        skipped_count = 0
-        for file_info, is_complete in results:
+            is_complete, _ = check_file_exists(filepath, url)
             if is_complete:
                 skipped_count += 1
-                logger.info("[下载] 文件已完整，跳过: %s", file_info.get("filename", "未命名"))
+                logger.info("[下载] 文件已完整，跳过: %s", filename)
             else:
                 files_to_download.append(file_info)
 

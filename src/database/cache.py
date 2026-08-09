@@ -42,6 +42,7 @@ class LRUCache:
         self._stats = {"hits": 0, "misses": 0, "skips": 0}
 
     def get(self, key):
+        logger.debug("LRU.get key=%s", key[:50] if key else "")
         acquired = self.lock.acquire(timeout=0.01)  # 10ms超时
         if acquired:
             try:
@@ -55,7 +56,7 @@ class LRUCache:
                 self.lock.release()
         else:
             self._stats["skips"] += 1
-            logger.debug("LRU.get 锁超时，跳过 (key=%s)", str(key)[:30] if key else "")
+            logger.debug("LRU.get 锁超时，跳过 (key=%s)", key[:30] if key else "")
             return None
 
     def put(self, key, value):
@@ -107,15 +108,6 @@ class LRUCache:
 
 
 class ImageCacheManager:
-    """图片两级缓存（内存 LRU + 磁盘 JPEG）。
-
-    Qt6 版实际加载路径为 _load_pil_from_url（下载/读盘/解码 → PIL Image），
-    由后台 ThumbnailWorker 转换 RGB bytes 回主线程重建 QPixmap。
-    """
-
-    # 磁盘大小统计缓存 TTL（避免每次打开设置页全量遍历缓存目录）
-    _DISK_SIZE_TTL = 30
-
     def __init__(self, cache_dir, max_memory=100, max_disk_mb=500):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
@@ -123,15 +115,77 @@ class ImageCacheManager:
         self._thumbnail_size = (180, 180)
         self.max_disk_bytes = max_disk_mb * 1024 * 1024
         self._cleanup_lock = threading.Lock()
-        # 磁盘大小统计缓存：{size, at}，TTL 内复用，避免频繁全目录 getsize
-        self._disk_size_cache = None
+        self._preload_queue = []     # 有序预加载队列（按距离当前位置排序）
+        self._preload_set = set()    # 去重辅助集合
+        self._preloading = False    # 预加载进行中标志
 
     def _get_cache_path(self, url):
         url_hash = hashlib.md5(url.encode()).hexdigest()
         return os.path.join(self.cache_dir, f"{url_hash}.jpg")
 
+    def _resize_thumbnail(self, img):
+        return img.copy().thumbnail(self._thumbnail_size, Image.Resampling.LANCZOS)
+
+    def get(self, url):
+        return self.get_thumbnail(url)
+
+    def get_at_size(self, url, size):
+        cache_key = f"load_{size}_{url}"
+        logger.debug("get_at_size: key=%s", cache_key[:60])
+        r = self.memory_cache.get(cache_key)
+        logger.debug("get_at_size 完成: %s", r is not None)
+        return r
+
+    def get_image(self, url):
+        cached = self.memory_cache.get(url)
+        if cached:
+            return cached
+
+        cache_path = self._get_cache_path(url)
+        if os.path.exists(cache_path):
+            try:
+                img = Image.open(cache_path)
+                img.load()
+                from PIL import ImageTk
+                photo = ImageTk.PhotoImage(img)
+                self.memory_cache.put(url, photo)
+                return photo
+            except Exception:
+                return None
+        return None
+
+    def get_thumbnail(self, url):
+        cache_key = f"thumb_{url}"
+        logger.debug("get_thumbnail: key=%s", cache_key[:60])
+        cached = self.memory_cache.get(cache_key)
+        logger.debug("get_thumbnail 内存查完: %s", cached is not None)
+        if cached:
+            return cached
+
+        cache_path = self._get_cache_path(url)
+        if os.path.exists(cache_path):
+            try:
+                logger.debug("get_thumbnail 读磁盘: %s", cache_path[-30:])
+                img = Image.open(cache_path)
+                img.load()
+                img_copy = img.copy()
+                img_copy.thumbnail(self._thumbnail_size, Image.Resampling.LANCZOS)
+                from PIL import ImageTk
+                photo = ImageTk.PhotoImage(img_copy)
+                self.memory_cache.put(cache_key, photo)
+                logger.debug("get_thumbnail 磁盘读取完成")
+                return photo
+            except Exception as e:
+                logger.debug("get_thumbnail 异常: %s", e)
+                return None
+        logger.debug("get_thumbnail 磁盘无缓存")
+        return None
+
     def _process_image(self, img_data):
-        """将 bytes 或 PIL.Image 转换为 RGB 模式的 PIL.Image（处理 RGBA 透明通道）。"""
+        """将 bytes 或 PIL.Image 转换为 RGB 模式的 PIL.Image（处理 RGBA 透明通道）。
+
+        save_image 和 save_thumbnail 共用的图像预处理逻辑。
+        """
         import io
         if isinstance(img_data, bytes):
             img = Image.open(io.BytesIO(img_data))
@@ -146,6 +200,55 @@ class ImageCacheManager:
             img = img.convert('RGB')
         return img
 
+    def save_image(self, url, img_data):
+        cache_path = self._get_cache_path(url)
+        try:
+            img = self._process_image(img_data)
+            img.save(cache_path, 'JPEG', quality=85, optimize=True)
+
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(img)
+            self.memory_cache.put(url, photo)
+            self._schedule_disk_cleanup()
+            return photo
+        except Exception as e:
+            logger.exception("保存图片失败")
+            return None
+
+    def save_thumbnail(self, url, img_data):
+        cache_key = f"thumb_{url}"
+        cache_path = self._get_cache_path(url)
+        try:
+            img = self._process_image(img_data)
+
+            if not os.path.exists(cache_path):
+                img.save(cache_path, 'JPEG', quality=85, optimize=True)
+
+            img_copy = img.copy()
+            img_copy.thumbnail(self._thumbnail_size, Image.Resampling.LANCZOS)
+            from PIL import ImageTk
+            photo = ImageTk.PhotoImage(img_copy)
+            self.memory_cache.put(cache_key, photo)
+            self._schedule_disk_cleanup()
+            return photo
+        except Exception as e:
+            logger.exception("保存缩略图失败")
+            return None
+
+    def load_from_url(self, url, size=None):
+        cache_key = f"load_{size}_{url}" if size else f"load_{url}"
+        cached = self.memory_cache.get(cache_key)
+        if cached:
+            return cached
+
+        pil_img = self._load_pil_from_url(url, size)
+        if pil_img is None:
+            return None
+        from PIL import ImageTk
+        photo = ImageTk.PhotoImage(pil_img)
+        self.memory_cache.put(cache_key, photo)
+        return photo
+
     def _load_pil_from_url(self, url, size=None):
         pil_cache_key = f"pil_{size}_{url}" if size else f"pil_{url}"
         cached = self.memory_cache.get(pil_cache_key)
@@ -158,10 +261,15 @@ class ImageCacheManager:
                 resp = get_http_session().get(url, timeout=10)
                 if resp.status_code != 200:
                     return None
-                img = self._process_image(resp.content)
+                import io
+                img = Image.open(io.BytesIO(resp.content))
+                if img.mode == 'RGBA':
+                    bg = Image.new('RGB', img.size, (255, 255, 255))
+                    bg.paste(img, mask=img.split()[3])
+                    img = bg
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
                 img.save(cache_path, 'JPEG', quality=85, optimize=True)
-                # 新增磁盘文件后触发超限清理（原来触发点仅在已删除的死代码方法中）
-                self._schedule_disk_cleanup()
             except Exception:
                 return None
 
@@ -179,28 +287,23 @@ class ImageCacheManager:
         except Exception:
             return None
 
+    def is_cached(self, url):
+        cache_path = self._get_cache_path(url)
+        return os.path.exists(cache_path)
+
     def clear_memory_cache(self):
         self.memory_cache.clear()
         self.memory_cache.clear_stats()
 
-    def _disk_size_bytes(self):
-        """统计磁盘缓存大小（带 TTL 缓存，避免每次全目录遍历）。"""
-        now = time.time()
-        if (self._disk_size_cache is not None
-                and now - self._disk_size_cache[1] < self._DISK_SIZE_TTL):
-            return self._disk_size_cache[0]
-        total = 0
+    def get_stats(self):
+        disk_size = 0
         if os.path.exists(self.cache_dir):
             for f in os.listdir(self.cache_dir):
                 try:
-                    total += os.path.getsize(os.path.join(self.cache_dir, f))
+                    disk_size += os.path.getsize(os.path.join(self.cache_dir, f))
                 except Exception:
                     pass
-        self._disk_size_cache = (total, now)
-        return total
 
-    def get_stats(self):
-        disk_size = self._disk_size_bytes()
         return {
             "memory_count": len(self.memory_cache.cache),
             "memory_capacity": self.memory_cache.capacity,
@@ -208,6 +311,54 @@ class ImageCacheManager:
             "disk_size_mb": round(disk_size / (1024 * 1024), 2),
             **self.memory_cache.get_stats()
         }
+
+    def preload_thumbnails(self, urls, current_index=0):
+        """智能预加载缩略图（前后各3张，按距离当前位置排序）"""
+        if not urls or self._preloading:
+            return
+
+        # 计算需要预加载的范围
+        preload_range = 3
+        start = max(0, current_index - preload_range)
+        end = min(len(urls), current_index + preload_range + 1)
+
+        # 按距离当前位置排序，优先加载最近的
+        urls_to_preload = []
+        for i in range(start, end):
+            u = urls[i]
+            if u and u not in self._preload_set:
+                urls_to_preload.append(u)
+                self._preload_set.add(u)
+
+        # 按距离排序后追加到队列
+        urls_to_preload.sort(key=lambda u: abs(urls.index(u) - current_index))
+        self._preload_queue.extend(urls_to_preload)
+
+        if not self._preloading and self._preload_queue:
+            self._preloading = True
+            threading.Thread(target=self._preload_worker, daemon=True).start()
+
+    def _preload_worker(self):
+        """后台预加载工作线程"""
+        try:
+            while self._preload_queue:
+                url = self._preload_queue.pop(0)
+                self._preload_set.discard(url)
+                if not url:
+                    continue
+
+                # 检查是否已在缓存中
+                cache_key = f"thumb_{url}"
+                if self.memory_cache.get(cache_key):
+                    continue
+
+                # 尝试从磁盘加载或下载
+                self.get_thumbnail(url)
+
+                # 短暂休眠，避免占用过多资源
+                time.sleep(0.05)
+        finally:
+            self._preloading = False
 
     def _schedule_disk_cleanup(self):
         # acquire 成功后启动清理线程，_cleanup_disk_cache 的 finally 负责释放锁
@@ -239,7 +390,5 @@ class ImageCacheManager:
                     total_size -= fsize
                 except Exception:
                     pass
-            # 清理后磁盘大小统计失效，下次按需重算
-            self._disk_size_cache = None
         finally:
             self._cleanup_lock.release()
