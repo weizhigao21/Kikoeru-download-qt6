@@ -346,6 +346,24 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
             return True
         return False
 
+    def remove_task(self, work_id: str) -> bool:
+        """从任务列表删除任务（下载管理右键菜单用）。
+
+        - 进行中（提交/下载/排队）任务：先取消下载再移除记录；
+        - 已完成/失败/取消任务：直接移除记录；
+        - 只移除任务记录，不删除磁盘上的已下载文件。
+        """
+        with self._tasks_lock:
+            task = self.tasks.get(work_id)
+        if not task:
+            return False
+        if task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED):
+            try:
+                self.cancel(work_id)
+            except Exception:
+                logger.exception("[任务] 删除前取消失败: %s", work_id)
+        return self.clear_pending_task(work_id)
+
     def clear_all_pending(self):
         with self._tasks_lock:
             work_ids = [

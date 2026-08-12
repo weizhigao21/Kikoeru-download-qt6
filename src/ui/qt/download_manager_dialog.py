@@ -10,7 +10,7 @@ import logging
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QHeaderView,
-                             QLabel, QMessageBox, QPushButton, QStyledItemDelegate,
+                             QLabel, QMenu, QMessageBox, QPushButton, QStyledItemDelegate,
                              QTabWidget, QTableView, QVBoxLayout, QWidget)
 
 from src.download.models import TaskStatus
@@ -246,6 +246,7 @@ class DownloadManagerDialog(QDialog):
         self.active_table = QTableView()
         self.active_table.setModel(_ActiveTaskModel(self))
         self._setup_table(self.active_table)
+        self._setup_context_menu(self.active_table)
         self.active_table.setColumnWidth(0, 90)
         self.active_table.setColumnWidth(1, 100)
         self.active_table.setColumnWidth(2, 260)
@@ -268,6 +269,7 @@ class DownloadManagerDialog(QDialog):
         self.done_table = QTableView()
         self.done_table.setModel(_DoneTaskModel(self))
         self._setup_table(self.done_table)
+        self._setup_context_menu(self.done_table)
         self.done_table.setColumnWidth(0, 40)
         self.done_table.setColumnWidth(1, 100)
         done_lay.addWidget(self.done_table)
@@ -319,6 +321,46 @@ class DownloadManagerDialog(QDialog):
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setHighlightSections(False)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+    # ---------- 右键菜单 ----------
+    def _setup_context_menu(self, table):
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            lambda pos, t=table: self._show_task_menu(t, pos)
+        )
+
+    def _show_task_menu(self, table, pos):
+        """右键任务行：删除任务（下载中的先取消，不动磁盘文件）。"""
+        idx = table.indexAt(pos)
+        if not idx.isValid():
+            return
+        model = table.model()
+        task = model.task_at(idx.row()) if hasattr(model, "task_at") else None
+        if task is None:
+            return
+
+        menu = QMenu(self)
+        if task.status in (TaskStatus.SUBMITTING, TaskStatus.DOWNLOADING, TaskStatus.QUEUED):
+            del_act = menu.addAction("取消并删除任务")
+        else:
+            del_act = menu.addAction("删除任务")
+        act = menu.exec(table.viewport().mapToGlobal(pos))
+        if act is None or act != del_act:
+            return
+
+        ret = QMessageBox.question(
+            self, "删除任务",
+            f"确定删除任务「{task.title[:30]}」？\n（仅移除任务记录，不删除已下载文件）",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.dl_manager.remove_task(task.work_id)
+        except Exception as e:
+            logger.exception("[任务] 删除任务失败: %s", task.work_id)
+            QMessageBox.warning(self, "错误", f"删除任务失败: {e}")
 
     # ---------- 刷新 ----------
     def _refresh(self):
