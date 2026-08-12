@@ -127,20 +127,25 @@ class DownloadPollMixin:
             from .. import config as _config
             if _config.AUTO_FLATTEN_ENABLED:
                 self._pending_flatten.append(task.save_dir)
-            need_convert = _config.SUBTITLE_CONVERT_ENABLED or _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED
-            if need_convert:
-                try:
-                    with self._tasks_lock:
-                        task.status = TaskStatus.CONVERTING
-                    self._notify_observers()
-                    threading.Thread(
-                        target=self._convert_subtitles_and_complete,
-                        args=(task,),
-                        daemon=True
-                    ).start()
-                    return
-                except Exception as e:
-                    logger.exception("[后处理] 启动失败: %s", e)
+        need_convert = _config.SUBTITLE_CONVERT_ENABLED or _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED
+        if need_convert:
+            try:
+                with self._tasks_lock:
+                    task.status = TaskStatus.CONVERTING
+                self._notify_observers()
+                th = threading.Thread(
+                    target=self._convert_subtitles_and_complete,
+                    args=(task,),
+                    # 非 daemon：程序退出前主窗口 closeEvent 会等待转换完成，
+                    # 避免下载完成后的繁简转换被进程退出强杀导致繁体残留（v2.0.9）
+                    daemon=False
+                )
+                with self._postprocess_lock:
+                    self._postprocess_threads.add(th)
+                th.start()
+                return
+            except Exception as e:
+                logger.exception("[后处理] 启动失败: %s", e)
         with self._tasks_lock:
             task.status = TaskStatus.COMPLETED
             task.completed_at = time.time()
@@ -208,26 +213,31 @@ class DownloadPollMixin:
         """转换字幕/繁简并标记任务完成"""
         from .. import config as _config
 
-        # 字幕转换
-        if _config.SUBTITLE_CONVERT_ENABLED:
-            try:
-                from ..services.subtitle_converter import process_subtitle_in_directory
-                converted = process_subtitle_in_directory(task.save_dir)
-                if converted:
-                    logger.info("[字幕] 转换完成: %d 个文件", len(converted))
-            except Exception as e:
-                logger.exception("[字幕] 转换失败: %s", e)
+        try:
+            # 字幕转换
+            if _config.SUBTITLE_CONVERT_ENABLED:
+                try:
+                    from ..services.subtitle_converter import process_subtitle_in_directory
+                    converted = process_subtitle_in_directory(task.save_dir)
+                    if converted:
+                        logger.info("[字幕] 转换完成: %d 个文件", len(converted))
+                except Exception as e:
+                    logger.exception("[字幕] 转换失败: %s", e)
 
-        # 繁简转换
-        if _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
-            try:
-                from ..services.text_converter import process_directory
-                result = process_directory(task.save_dir)
-                if result['content_converted'] or result['filename_converted']:
-                    logger.info("[繁简] 转换完成: 内容 %d 个, 文件名 %d 个",
-                               len(result['content_converted']), len(result['filename_converted']))
-            except Exception as e:
-                logger.exception("[繁简] 转换失败: %s", e)
+            # 繁简转换
+            if _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
+                try:
+                    from ..services.text_converter import process_directory
+                    result = process_directory(task.save_dir)
+                    if result['content_converted'] or result['filename_converted']:
+                        logger.info("[繁简] 转换完成: 内容 %d 个, 文件名 %d 个",
+                                   len(result['content_converted']), len(result['filename_converted']))
+                except Exception as e:
+                    logger.exception("[繁简] 转换失败: %s", e)
+        finally:
+            # 从后处理线程登记中移除（当前线程）
+            with self._postprocess_lock:
+                self._postprocess_threads.discard(threading.current_thread())
 
         with self._tasks_lock:
             task.status = TaskStatus.COMPLETED

@@ -7,11 +7,11 @@ observer 在轮询线程被调用，通过信号跨线程调度回主线程刷�
 """
 import logging
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QHBoxLayout, QHeaderView,
-                             QLabel, QPushButton, QStyledItemDelegate, QTabWidget,
-                             QTableView, QVBoxLayout, QWidget)
+                             QLabel, QMessageBox, QPushButton, QStyledItemDelegate,
+                             QTabWidget, QTableView, QVBoxLayout, QWidget)
 
 from src.download.models import TaskStatus
 from src.ui.qt.qt_fonts import TITLE_BOLD
@@ -278,11 +278,38 @@ class DownloadManagerDialog(QDialog):
         self.tabs.addTab(done_tab, "已完成")
 
         bottom = QHBoxLayout()
+        self.t2s_btn = QPushButton("繁简转换")
+        self.t2s_btn.setToolTip("对已完成任务的目录重新执行繁体转简体（文件名+字幕内容）")
+        self.t2s_btn.clicked.connect(self._on_t2s_clicked)
+        bottom.addWidget(self.t2s_btn)
         bottom.addStretch(1)
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)
         bottom.addWidget(close_btn)
         lay.addLayout(bottom)
+
+    def _on_t2s_clicked(self):
+        """手动对已完成任务目录重新执行繁简转换（解决自动转换漏转/被中断的存量文件）。"""
+        try:
+            from src import config as _config
+            if not _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
+                QMessageBox.information(self, "提示", "繁简转换未在设置中开启，请先在「设置」中启用。")
+                return
+            started = self.dl_manager.reprocess_t2s()
+            if started:
+                self.t2s_btn.setEnabled(False)
+                self.t2s_btn.setText("转换中…")
+                self.count_label.setText(self.count_label.text() + "  |  繁简转换进行中")
+                QTimer.singleShot(3000, self._restore_t2s_btn)
+            else:
+                QMessageBox.information(self, "提示", "没有可转换的已完成任务目录。")
+        except Exception as e:
+            logger.exception("[繁简] 手动转换启动失败")
+            QMessageBox.warning(self, "错误", f"启动繁简转换失败: {e}")
+
+    def _restore_t2s_btn(self):
+        self.t2s_btn.setEnabled(True)
+        self.t2s_btn.setText("繁简转换")
 
     @staticmethod
     def _setup_table(table):

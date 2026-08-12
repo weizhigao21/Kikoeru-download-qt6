@@ -1150,6 +1150,12 @@ class MainWindow(QMainWindow):
             self.dl_manager.remove_observer(self._downloads_changed.emit)
         except Exception:
             pass
+        # 等待下载完成后的字幕/繁简转换线程结束（最多 15s），
+        # 避免退出时转换被强杀导致繁体文件残留（v2.0.9）
+        try:
+            self.dl_manager.wait_for_postprocess(15)
+        except Exception:
+            pass
         # 通知缩略图 worker 立即停止当前批次（generation=-1 + 线程池关闭）
         try:
             self._thumb_worker.request.emit([], -1)

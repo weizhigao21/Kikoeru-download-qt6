@@ -55,6 +55,10 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
         self._pending_flatten: list[str] = []
         self._flattening = False
         self._poll_wake_event = threading.Event()
+        # 后处理（字幕/繁简转换）线程登记：非 daemon，程序退出前需等待完成，
+        # 避免下载完成后的繁简转换被进程退出强杀（v2.0.9）
+        self._postprocess_threads: set = set()
+        self._postprocess_lock = threading.Lock()
 
     def set_download_history(self, dh):
         self.download_history = dh
@@ -193,6 +197,73 @@ class DownloadManager(DownloadCoreMixin, DownloadPollMixin):
     def get_all_tasks(self) -> list[DownloadTask]:
         with self._tasks_lock:
             return list(self.tasks.values())
+
+    def wait_for_postprocess(self, timeout: float = 15.0):
+        """等待所有进行中的后处理（字幕/繁简转换）线程结束。
+
+        程序退出前调用，保证下载完成后的转换不会被强杀。
+        超时后放弃等待（避免拖死退出），未完成的转换由下次手动转换兜底。
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._postprocess_lock:
+                if not self._postprocess_threads:
+                    return
+            time.sleep(0.1)
+        logger.warning("[后处理] 等待转换线程超时(%ss)，剩余 %d 个线程",
+                       timeout, len(self._postprocess_threads))
+
+    def reprocess_t2s(self, work_id: str = None) -> bool:
+        """手动重新执行繁简转换。
+
+        Args:
+            work_id: 指定任务；为 None 时处理所有已完成任务的 save_dir。
+                     当前活跃下载任务的目录会被跳过。
+
+        Returns:
+            是否已启动转换线程
+        """
+        from .. import config as _config
+        if not _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED:
+            logger.info("[繁简] 手动转换跳过：设置未开启繁简转换")
+            return False
+
+        targets = []
+        with self._tasks_lock:
+            tasks = list(self.tasks.values())
+        for t in tasks:
+            if work_id is not None and t.work_id != work_id:
+                continue
+            if not t.save_dir:
+                continue
+            if t.status in (TaskStatus.DOWNLOADING, TaskStatus.SUBMITTING, TaskStatus.QUEUED, TaskStatus.CONVERTING):
+                continue
+            targets.append(t.save_dir)
+        targets = list(dict.fromkeys(targets))  # 去重保序
+
+        if not targets:
+            logger.info("[繁简] 手动转换：没有可转换的任务目录")
+            return False
+
+        def _run():
+            from ..services.text_converter import process_directory
+            total_content = total_filename = 0
+            for d in targets:
+                try:
+                    result = process_directory(d)
+                    total_content += len(result['content_converted'])
+                    total_filename += len(result['filename_converted'])
+                except Exception:
+                    logger.exception("[繁简] 手动转换失败: %s", d)
+            logger.info("[繁简] 手动转换完成: 内容 %d 个, 文件名 %d 个",
+                        total_content, total_filename)
+
+        th = threading.Thread(target=_run, daemon=False)
+        with self._postprocess_lock:
+            self._postprocess_threads.add(th)
+        th.start()
+        logger.info("[繁简] 手动转换已启动: %d 个目录", len(targets))
+        return True
 
     def get_active_tasks(self) -> list[DownloadTask]:
         with self._tasks_lock:

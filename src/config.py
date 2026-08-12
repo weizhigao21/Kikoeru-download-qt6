@@ -69,7 +69,7 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.0.8"
+VERSION = "v2.0.9"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
