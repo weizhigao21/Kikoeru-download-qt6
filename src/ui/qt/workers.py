@@ -44,6 +44,8 @@ class DataWorker(QObject):
     search_loaded = pyqtSignal(int, list, int, str, object)  # (generation, works, max_page, query_type, query)
     downloads_loaded = pyqtSignal(int, list, str)         # (generation, works, sort_key)
     work_detail_loaded = pyqtSignal(int, dict)            # (generation, data)
+    undownloaded = pyqtSignal(str, int)                   # (order, generation)
+    undownloaded_loaded = pyqtSignal(int, list, str)      # (generation, works, order)
     failed = pyqtSignal(int, str)                # (generation, error)
 
     def __init__(self, db, api, dl_history=None, parent=None):
@@ -107,11 +109,20 @@ class DataWorker(QObject):
             self.failed.emit(generation, str(e))
 
     @pyqtSlot(str, int)
+    def load_undownloaded(self, order, generation):
+        """下载页 tab：读 works 表全部未隐藏作品（未下载过滤由主线程完成）。"""
+        try:
+            works = self._db.get_all_works(order)
+            self.undownloaded_loaded.emit(generation, works, order)
+        except Exception as e:
+            self.failed.emit(generation, str(e))
+
+    @pyqtSlot(str, int)
     def fetch_detail(self, source_id, generation):
         try:
             data = self._api.fetch_work_detail(source_id)
             self.work_detail_loaded.emit(generation, data or {})
-        except Exception as e:
+        except Exception:
             self.work_detail_loaded.emit(generation, {})
 
 

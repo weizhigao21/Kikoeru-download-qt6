@@ -6,12 +6,14 @@
 
 ## 版本
 
-**v2.0.9**（当前版本，Qt6 UI）
+**v2.1.0**（当前版本，Qt6 UI）
 
 ## 功能特性
 
 ### 浏览与搜索
-- **三列表浏览**：支持"推荐作品"、"最新收录"和"下载作品"三个数据源切换
+- **四列表浏览**：支持"推荐作品"、"最新收录"、"下载作品"和"没有下载"四个数据源切换
+- **没有下载 tab**（v2.1.0）：新增第 4 个 tab「没有下载」，展示数据库中所有未下载的作品（其他语言版本复用卡片紫色可点击标签），按**发售日期**倒序排列（最新发售在前）
+- **自动采集**（v2.1.0）：后台每 3s 自动采集「最新收录」作品入本地库，头部追新（第 1 页有新作品优先入库）+ 游标补历史双轨调度；递增步长跳页快速跨历史区，回退锁定避免跳页漏边界；采集游标持久化到数据库，断点续扫、跨天计数归零但游标保持；每日入库上限兜底不冲击服务器
 - **分页浏览**：支持按页查看作品列表，每页显示 20 个作品
 - **隐藏下载作品**：在"推荐作品"和"最新收录"模式下，点击按钮切换"显示全部/隐藏下载"状态，快速过滤已下载作品
 - **标签搜索**：点击任意标签快速筛选同类作品，支持多标签组合搜索（AND 交集），每个标签可单独移除
@@ -123,6 +125,7 @@
 - `src/ui/qt/top_bar.py` / `bottom_bar.py` — 顶栏（tab/搜索/排序）与底栏（翻页居中/下载管理/设置）
 - `src/ui/qt/download_dialog.py` / `download_manager_dialog.py` / `settings_dialog.py` — 三个对话框（文件树/任务列表/设置五页）
 - `src/ui/qt/workers.py` — `DataWorker` / `ThumbnailWorker`（QThread + signal/slot 跨线程）
+- `src/ui/qt/collector.py` — `NewWorksPoller` 自动采集线程（双轨定时器：头部追新 + 游标补历史，递增步长跳页 + 回退锁定、采集游标持久化、每日上限）
 - `src/ui/qt/qt_fonts.py` / `styles.py` — Qt 字体适配层（复用 `src/ui/fonts.py` 常量）与 QSS 样式
 - `legacy_tk/` — v2.0.0 归档的 tkinter 版 UI（gui_app*.py 与 src/ui 下 10 个模块）
 - `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
@@ -168,6 +171,7 @@ g:\code\音声下载\
 │           ├── top_bar.py / bottom_bar.py
 │           ├── download_dialog.py / download_manager_dialog.py / settings_dialog.py
 │           ├── workers.py       # DataWorker / ThumbnailWorker
+│           ├── collector.py     # NewWorksPoller 自动采集线程
 │           └── styles.py / qt_fonts.py
 ├── settings/                   # 配置和数据库目录（默认位置）
 │   ├── config.json             # JSON 配置文件
@@ -289,7 +293,7 @@ API 请求客户端，负责与服务器通信，所有请求支持指数退避�
 Qt6 主窗口类（v2.0.0），QThread + signal/slot 跨线程，替代 tkinter 版 Mixin 组合：
 
 - **app.py** — `QApplication` 入口（全局字体微软雅黑 UI + QSS 样式 + logging 配置）
-- **main_window.py** — `MainWindow`：三 tab 导航、分页/搜索/过滤编排、右键翻译动作（翻译/编辑/重新翻译/删除）、下载管理与三个对话框接线、closeEvent 线程与数据库清理
+- **main_window.py** — `MainWindow`：四 tab 导航、分页/搜索/过滤编排、右键翻译动作（翻译/编辑/重新翻译/删除）、下载管理与三个对话框接线、closeEvent 线程与数据库清理
 - **works_list.py** — `WorksListView` + `WorksListModel` + `WorkCardDelegate`：列表虚拟化，仅实例化可见行，卡片全 QPainter 绘制
 - **detail_panel.py** — `DetailPanel`（QScrollArea）：完整字段、FlowTags 圆角标签流式布局、可点击厂商、译/原切换、复制
 - **workers.py** — `DataWorker` / `ThumbnailWorker`：数据/图片后台线程，信号 queued 回主线程，generation 校验丢弃过期批次
@@ -298,17 +302,18 @@ Qt6 主窗口类（v2.0.0），QThread + signal/slot 跨线程，替代 tkinter 
 
 ## 界面说明
 
-- **顶部导航栏**：列表切换（推荐作品/最新收录/下载作品）、刷新按钮、统一搜索框（支持文本输入、标签搜索时替换为彩色标签 chip）、排序下拉框
+- **顶部导航栏**：列表切换（推荐作品/最新收录/下载作品/没有下载）、刷新按钮、统一搜索框（支持文本输入、标签搜索时替换为彩色标签 chip）、排序下拉框
 - **左侧列表区**：显示作品缩略图、标题、彩色标签（点击可搜索）、ID复制按钮和下载状态
 - **右侧详情区**：显示选中作品的完整信息，厂商名可点击搜索
 - **底部导航栏**：上一页/下一页按钮、页码跳转、设置按钮
 
 ## 列表切换
 
-支持三个数据源：
+支持四个数据源：
 1. **推荐作品**：基于推荐算法的作品列表
 2. **最新收录**：按收录时间排序的最新作品
 3. **下载作品**：已下载的作品列表（支持排序和分页，切换 tab 自动缓存）
+4. **没有下载**：数据库中所有未下载的作品，按发售日期倒序（最新发售在前），由后台自动采集持续补充
 
 ## 筛选功能
 

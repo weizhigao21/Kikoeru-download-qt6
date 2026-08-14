@@ -64,6 +64,9 @@ class SettingsDialog(QDialog):
             "subtitle_convert_enabled": get("subtitle_convert_enabled", True),
             "auto_flatten_enabled": get("auto_flatten_enabled", True),
             "traditional_to_simplified_enabled": get("traditional_to_simplified_enabled", True),
+            "auto_collect_enabled": get("auto_collect_enabled", True),
+            "daily_new_works_limit": get("daily_new_works_limit", 500),
+            "head_poll_interval": get("head_poll_interval", 60),
         }
 
         self._build_ui()
@@ -237,6 +240,36 @@ class SettingsDialog(QDialog):
         self.t2s_check = QCheckBox("启用繁简转换（下载完成后自动将繁体字幕和文件名转为简体）")
         self.t2s_check.setChecked(bool(v["traditional_to_simplified_enabled"]))
         page_lay.addWidget(self.t2s_check)
+
+        # 自动采集（下载页功能）
+        self.auto_collect_check = QCheckBox("启用自动采集（后台采集最新作品到「没有下载」页）")
+        self.auto_collect_check.setChecked(bool(v["auto_collect_enabled"]))
+        page_lay.addWidget(self.auto_collect_check)
+
+        collect_grid = self._form_grid(page_lay)
+        collect_grid.addWidget(QLabel("每日采集新作品上限:"), 0, 0)
+        limit_row = QHBoxLayout()
+        limit_row.setSpacing(8)
+        self.daily_limit_spin = QSpinBox()
+        self.daily_limit_spin.setRange(0, 100000)
+        self.daily_limit_spin.setValue(int(v["daily_new_works_limit"]))
+        limit_row.addWidget(self.daily_limit_spin)
+        limit_row.addWidget(self._hint("(0 = 不限，达到上限当天暂停采集)"))
+        limit_row.addStretch(1)
+        collect_grid.addLayout(limit_row, 0, 1)
+
+        collect_grid.addWidget(QLabel("头部追新间隔:"), 1, 0)
+        head_row = QHBoxLayout()
+        head_row.setSpacing(8)
+        self.head_interval_spin = QSpinBox()
+        self.head_interval_spin.setRange(10, 3600)
+        self.head_interval_spin.setSuffix(" 秒")
+        self.head_interval_spin.setValue(int(v["head_poll_interval"]))
+        head_row.addWidget(self.head_interval_spin)
+        head_row.addWidget(self._hint("(检查第 1 页新作品的时间间隔)"))
+        head_row.addStretch(1)
+        collect_grid.addLayout(head_row, 1, 1)
+
         page_lay.addStretch(1)
 
         self.pages.addWidget(page)
@@ -493,6 +526,9 @@ class SettingsDialog(QDialog):
         new_subtitle_convert = self.subtitle_convert_check.isChecked()
         new_auto_flatten = self.auto_flatten_check.isChecked()
         new_t2s = self.t2s_check.isChecked()
+        new_auto_collect = self.auto_collect_check.isChecked()
+        new_daily_limit = self.daily_limit_spin.value()
+        new_head_interval = self.head_interval_spin.value()
 
         old_db_dir = self.cfg.get("db_dir", "")
 
@@ -520,6 +556,9 @@ class SettingsDialog(QDialog):
                 "subtitle_convert_enabled": new_subtitle_convert,
                 "auto_flatten_enabled": new_auto_flatten,
                 "traditional_to_simplified_enabled": new_t2s,
+                "auto_collect_enabled": new_auto_collect,
+                "daily_new_works_limit": new_daily_limit,
+                "head_poll_interval": new_head_interval,
             })
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4, ensure_ascii=False)
@@ -550,9 +589,24 @@ class SettingsDialog(QDialog):
         _config.SUBTITLE_CONVERT_ENABLED = new_subtitle_convert
         _config.AUTO_FLATTEN_ENABLED = new_auto_flatten
         _config.TRADITIONAL_TO_SIMPLIFIED_ENABLED = new_t2s
+        _config.AUTO_COLLECT_ENABLED = new_auto_collect
+        _config.DAILY_NEW_WORKS_LIMIT = new_daily_limit
+        _config.HEAD_POLL_INTERVAL = new_head_interval
 
         from src.download.manager import DownloadManager
         DownloadManager().set_queue_mode(new_queue_mode, new_max_concurrent)
+
+        # 通知采集线程应用新设置（跨线程 queued 调用，避免 timer 跨线程 start）
+        parent = self.parent()
+        if parent is not None and getattr(parent, "_collector", None) is not None:
+            from PyQt6.QtCore import QMetaObject, Q_ARG, Qt as _Qt
+            collector = parent._collector
+            QMetaObject.invokeMethod(collector, "set_enabled",
+                                     _Qt.ConnectionType.QueuedConnection,
+                                     Q_ARG(bool, new_auto_collect))
+            QMetaObject.invokeMethod(collector, "set_head_interval",
+                                     _Qt.ConnectionType.QueuedConnection,
+                                     Q_ARG(int, new_head_interval))
 
         translator = get_translator()
         if new_ai_enabled and new_ai_key:

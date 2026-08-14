@@ -42,7 +42,7 @@ class TopBarWidget(QWidget):
         lay.setSpacing(8)
 
         self.tab_combo = QComboBox()
-        self.tab_combo.addItems(["推荐作品", "最新收录", "下载作品"])
+        self.tab_combo.addItems(["推荐作品", "最新收录", "下载作品", "没有下载"])
         self.tab_combo.setFixedWidth(110)
         lay.addWidget(self.tab_combo)
 
@@ -113,6 +113,12 @@ class TopBarWidget(QWidget):
         # sizeHint 进而挤压搜索区/移动右侧控件；给最小宽度吸收差异，布局稳定
         self.status_label.setMinimumWidth(170)
         lay.addWidget(self.status_label)
+
+        self.collect_status_label = QLabel("")
+        self.collect_status_label.setObjectName("collectStatusLabel")
+        # 采集状态（后台轮询驱动），独立于 status_label，避免与翻页/搜索状态互相覆盖
+        self.collect_status_label.setMinimumWidth(150)
+        lay.addWidget(self.collect_status_label)
 
     # ---------- 搜索条件 chips（厂商 chip + 标签 chips 可共存） ----------
     def _make_chip(self, text, color, hover):

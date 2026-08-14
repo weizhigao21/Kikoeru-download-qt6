@@ -37,6 +37,9 @@ _DEFAULT_CONFIG = {
     "subtitle_convert_enabled": False,
     "auto_flatten_enabled": True,
     "traditional_to_simplified_enabled": True,
+    "auto_collect_enabled": True,       # 启动后是否自动开始采集（下载页功能）
+    "daily_new_works_limit": 500,       # 每日入库新作品上限（0 = 不限）
+    "head_poll_interval": 60,           # 头部追新间隔（秒）
 }
 
 
@@ -69,7 +72,7 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.0.9"
+VERSION = "v2.1.0"
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -142,3 +145,6 @@ MAX_SLOW_RESTARTS = _cfg["max_slow_restarts"]
 SUBTITLE_CONVERT_ENABLED = _cfg["subtitle_convert_enabled"]
 AUTO_FLATTEN_ENABLED = _cfg["auto_flatten_enabled"]
 TRADITIONAL_TO_SIMPLIFIED_ENABLED = _cfg["traditional_to_simplified_enabled"]
+AUTO_COLLECT_ENABLED = _cfg["auto_collect_enabled"]
+DAILY_NEW_WORKS_LIMIT = _cfg["daily_new_works_limit"]
+HEAD_POLL_INTERVAL = _cfg["head_poll_interval"]
