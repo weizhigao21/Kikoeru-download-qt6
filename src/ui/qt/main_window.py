@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self._downloaded_page = 1
         # 下载页（「没有下载」tab）本地缓存：全量未下载作品 + 当前本地页码
         self._undownloaded_works = []
+        self._undl_scroll_top = True  # 未下载列表加载后是否置顶（局部刷新=False）
         self.show_downloaded = SHOW_ALL
         self._hide_downloaded = False
         self.sort_map = {
@@ -291,15 +292,21 @@ class MainWindow(QMainWindow):
         else:
             self._load_data(1)
 
-    def _show_works(self, works, status_text):
-        """公共展示：过滤 → model → 详情 → 缩略图 → 按钮状态。"""
+    def _show_works(self, works, status_text, scroll_to_top=True, show_first_detail=True):
+        """公共展示：过滤 → model → 详情 → 缩略图 → 按钮状态。
+
+        scroll_to_top=True 用于翻页/搜索/切换（回到顶部）；
+        局部刷新（下载完成/新数据入库/删除/隐藏）传 False 保持滚动位置，
+        同时传 show_first_detail=False 保持当前详情面板（避免视觉跳变）。
+        """
         works = self._apply_filter(works)
         self.works = works
-        self.list_view.set_works(works, scroll_to_top=True)
+        self.list_view.set_works(works, scroll_to_top=scroll_to_top)
         self._sync_translations()
         self._set_status(status_text)
         self._request_thumbs()
-        self._show_first_detail()
+        if show_first_detail:
+            self._show_first_detail()
         self._update_nav_buttons()
 
     def _sync_translations(self):
@@ -384,9 +391,11 @@ class MainWindow(QMainWindow):
         self.page_entry.setText(str(self._downloaded_page))
 
     # ---------- 下载页（「没有下载」tab） ----------
-    def _load_undownloaded(self):
+    def _load_undownloaded(self, scroll_to_top=True):
+        """加载未下载列表。scroll_to_top=False 用于局部刷新（下载完成/新数据入库等），保持滚动位置。"""
         self._nav_generation += 1
         gen = self._nav_generation
+        self._undl_scroll_top = scroll_to_top
         self._set_status("正在加载未下载作品...")
         self._data_worker.undownloaded.emit("release_desc", gen)
 
@@ -398,25 +407,34 @@ class MainWindow(QMainWindow):
         undownloaded = [w for w in works
                         if normalize_rj_id(w.get("source_id", "")) not in self.downloaded_ids_cache]
         self._undownloaded_works = undownloaded
-        self.current_page = 1
-        self.page_entry.setText("1")
-        self._show_undownloaded_page()
+        # 初始加载/手动刷新回第 1 页；局部刷新保持当前页码（不跳回顶部）
+        if self._undl_scroll_top:
+            self.current_page = 1
+            self.page_entry.setText("1")
+        # 刷新后列表可能变短，页码越界钳制到最后一页
+        total_pages = max(1, (len(undownloaded) + PAGE_SIZE - 1) // PAGE_SIZE)
+        if self.current_page > total_pages:
+            self.current_page = total_pages
+        self._show_undownloaded_page(scroll_to_top=self._undl_scroll_top)
 
-    def _show_undownloaded_page(self):
+    def _show_undownloaded_page(self, scroll_to_top=True):
         total = len(self._undownloaded_works)
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         self.max_page = total_pages
         start = (self.current_page - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
+        # 局部刷新（scroll_to_top=False）时保持当前详情面板，避免视觉跳变
         self._show_works(self._undownloaded_works[start:end],
-                         f"没有下载 {total} 个作品，第 {self.current_page}/{total_pages} 页")
+                         f"没有下载 {total} 个作品，第 {self.current_page}/{total_pages} 页",
+                         scroll_to_top=scroll_to_top,
+                         show_first_detail=scroll_to_top)
         self.page_entry.setText(str(self.current_page))
 
     # ---------- 自动采集回调 ----------
     def _on_collected(self, count):
-        """采集线程入库新作品后回调：若当前停在「没有下载」tab 则刷新。"""
+        """采集线程入库新作品后回调：若当前停在「没有下载」tab 则刷新（保持滚动位置）。"""
         if self.current_tab == "undownloaded":
-            self._load_undownloaded()
+            self._load_undownloaded(scroll_to_top=False)
 
     def _on_collect_status(self, text):
         self.top_bar.collect_status_label.setText(text)
@@ -895,7 +913,7 @@ class MainWindow(QMainWindow):
         self.db.hide_work(work_id)
         self._set_status(f"✓ 已隐藏: {work.get('title', '')[:20]}...")
         if self.current_tab == "undownloaded":
-            self._load_undownloaded()
+            self._load_undownloaded(scroll_to_top=False)
             return
         if work in self.works:
             self.works.remove(work)
@@ -940,7 +958,7 @@ class MainWindow(QMainWindow):
             self._downloads_cache_sort = None  # 删除记录后强制重新查库
             self._load_downloads()
         elif self.current_tab == "undownloaded":
-            self._load_undownloaded()
+            self._load_undownloaded(scroll_to_top=False)
         else:
             # 重新过滤当前列表（若该作品已不在列表，无需处理）
             if work in self.works:
@@ -1139,7 +1157,7 @@ class MainWindow(QMainWindow):
             self._downloads_cache_sort = None
             # 已下载集合变化 → 若停在「没有下载」tab 则刷新（该作品应移出未下载列表）
             if self.current_tab == "undownloaded":
-                self._load_undownloaded()
+                self._load_undownloaded(scroll_to_top=False)
 
     def _open_download_dialog(self, work):
         """双击作品 → 下载选择对话框（每次新建，完成后清理引用）。

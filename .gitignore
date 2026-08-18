@@ -61,5 +61,4 @@ desktop.ini
 .env.local
 
 # 打包产物
-*.spec
 *.exe

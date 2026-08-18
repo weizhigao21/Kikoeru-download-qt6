@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v2.1.0**（当前版本，Qt6 UI）
+**v2.1.1**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -24,7 +24,7 @@
 - **标签搜索芯片**：点击标签后搜索框替换为彩色标签 chip（色池循环上色、悬停加深，每个带 ✕ 按钮可单独移除），支持多标签累积搜索；厂商 chip 与标签 chips 可并排共存，实现「厂商 + 标签」组合搜索
 - **下载作品本地搜索**：在「下载作品」tab 内点击标签/厂商或关键词搜索直接走本地数据库过滤（不请求 API），切换到「最新/推荐」tab 才走 API 搜索
 - **切换保留搜索条件**：切换 tab 后之前的标签/厂商/关键词搜索条件与 chips 保留，自动用同一条件在新 tab 继续搜索
-- **滚动位置重置**（v2.0.6）：翻页/搜索/刷新后列表滚动条自动回到顶部；详情刷新 / 隐藏作品 / 删除记录等局部操作保持当前滚动位置（`WorksListView.set_works(works, scroll_to_top)` 统一入口按场景控制）
+- **滚动位置重置**（v2.0.6）：翻页/搜索/刷新后列表滚动条自动回到顶部；详情刷新 / 隐藏作品 / 删除记录 / 「没有下载」页自动刷新（下载完成 / 新数据入库）等局部操作保持当前滚动位置与详情面板（`WorksListView.set_works(works, scroll_to_top)` 统一入口按场景控制）
 
 ### AI 翻译
 - **AI 标题翻译**：支持使用 OpenAI 兼容 API（如 DeepSeek、GPT 等）翻译作品标题
@@ -193,11 +193,12 @@ g:\code\音声下载\
 - PyQt6
 - requests
 - Pillow
+- zhconv（下载完成后繁简转换）
 
 安装依赖：
 
 ```bash
-pip install PyQt6 requests Pillow
+pip install PyQt6 requests Pillow zhconv
 ```
 
 ## 运行方式
@@ -210,20 +211,22 @@ python app.py
 
 ## 打包发布
 
-使用 PyInstaller 打包（onedir 模式，启动免解压、速度更快）：
+**一键打包**：双击运行项目根目录的 `打包.bat` 即可（自动定位 Python 3.10、检查/安装依赖与 PyInstaller、备份旧产物、打包、精简产物、校验 exe），产物为 `dist/音声浏览下载/` 目录（单个 exe + `_internal/` 依赖目录），启动约 1-2 秒出窗口，分发时将整个目录压缩为 zip 发布。
+
+手动打包（PyInstaller onedir 模式）：
 
 ```bash
 pip install pyinstaller
 pyinstaller --noconfirm 音声浏览下载.spec
 ```
 
-产物为 `dist/音声浏览下载/` 目录（单个 exe + `_internal/` 依赖目录），启动约 1-2 秒出窗口，分发时将整个目录压缩为 zip 发布。spec 已配置：入口 `app.py`（Qt6）、`settings\ui.ico` 图标、`console=False`（无控制台窗口）、`optimize=2`、排除 tkinter/pywin32 等未用库。
+产物约 **87MB**（v2.1.1 起已精简：`spec` 排除 numpy / PyQt6.QtPdf 等未用库，打包后仅保留简体中文 Qt 翻译、删除软件 OpenGL 渲染器 `opengl32sw.dll`；aria2 不再打包）。spec 已配置：入口 `app.py`（Qt6）、`settings\ui.ico` 图标、`console=False`（无控制台窗口）、`optimize=2`、排除 tkinter/pywin32/pythonnet 等未用库。
 
 ### 外部资源目录
 
 | 目录 | 用途 | 查找顺序 |
 |---|---|---|
-| `aria2/` | aria2.exe 等下载工具 | exe 旁 `aria2/` 优先 → `_internal/aria2/` 回退；config.json 的 `aria2_dir` 可指定绝对路径 |
+| `aria2/` | aria2.exe 等下载工具（**v2.1.1 起不再打包进 exe**，需在 exe 旁放置） | exe 旁 `aria2/`；config.json 的 `aria2_dir` 可指定绝对路径 |
 | `settings/` | config.json 配置、works.db / download_history.db 数据库（首次运行自动创建） | exe 旁 `settings/` |
 | `downloads/` | 下载作品存放 | exe 旁 `downloads/`，config.json 的 `download_dir` 可指定绝对路径 |
 
