@@ -292,16 +292,22 @@ class MainWindow(QMainWindow):
         else:
             self._load_data(1)
 
-    def _show_works(self, works, status_text, scroll_to_top=True, show_first_detail=True):
+    def _show_works(self, works, status_text, scroll_to_top=True, show_first_detail=True,
+                    preserve_scroll=False):
         """公共展示：过滤 → model → 详情 → 缩略图 → 按钮状态。
 
         scroll_to_top=True 用于翻页/搜索/切换（回到顶部）；
         局部刷新（下载完成/新数据入库/删除/隐藏）传 False 保持滚动位置，
         同时传 show_first_detail=False 保持当前详情面板（避免视觉跳变）。
+
+        preserve_scroll=True 时让 list_view 在 set_works 入口保存原始 ratio，
+        多帧延迟恢复滚动位置（对付"底栏 rebuild 挤压 viewport 触发 Qt 自动
+        调整滚动条"导致的微妙位置跳变；用作局部刷新场景的显式保护）。
         """
         works = self._apply_filter(works)
         self.works = works
-        self.list_view.set_works(works, scroll_to_top=scroll_to_top)
+        self.list_view.set_works(works, scroll_to_top=scroll_to_top,
+                                 preserve_scroll=preserve_scroll)
         self._sync_translations()
         self._set_status(status_text)
         self._request_thumbs()
@@ -415,19 +421,23 @@ class MainWindow(QMainWindow):
         total_pages = max(1, (len(undownloaded) + PAGE_SIZE - 1) // PAGE_SIZE)
         if self.current_page > total_pages:
             self.current_page = total_pages
-        self._show_undownloaded_page(scroll_to_top=self._undl_scroll_top)
+        self._show_undownloaded_page(scroll_to_top=self._undl_scroll_top,
+                                     preserve_scroll=not self._undl_scroll_top)
 
-    def _show_undownloaded_page(self, scroll_to_top=True):
+    def _show_undownloaded_page(self, scroll_to_top=True, preserve_scroll=False):
         total = len(self._undownloaded_works)
         total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         self.max_page = total_pages
         start = (self.current_page - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
         # 局部刷新（scroll_to_top=False）时保持当前详情面板，避免视觉跳变
+        # preserve_scroll=True 在下载完成/采集入库/删除/隐藏时显式保护滚动位置，
+        # 对付底栏 rebuild 触发 viewport 挤压时的位置跳变
         self._show_works(self._undownloaded_works[start:end],
                          f"没有下载 {total} 个作品，第 {self.current_page}/{total_pages} 页",
                          scroll_to_top=scroll_to_top,
-                         show_first_detail=scroll_to_top)
+                         show_first_detail=scroll_to_top,
+                         preserve_scroll=preserve_scroll)
         self.page_entry.setText(str(self.current_page))
 
     # ---------- 自动采集回调 ----------

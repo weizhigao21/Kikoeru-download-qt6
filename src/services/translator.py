@@ -3,6 +3,7 @@ import json
 import threading
 import logging
 import time
+import re
 from typing import Optional, Callable
 from collections import OrderedDict
 
@@ -91,7 +92,7 @@ class TranslatorService:
         ).start()
 
     def _translate_thread(self, text: str, callback: Callable[[Optional[str]], None], timeout: int = 30):
-        """翻译线程，带超时保护"""
+        """翻译线程，带超时保护 + 结果清洗 + 思考模式降级重试。"""
         start_time = time.time()
         try:
             if not self._api_key:
@@ -99,38 +100,13 @@ class TranslatorService:
                 self._safe_callback(callback, None)
                 return
 
-            url = f"{self._base_url}/chat/completions"
             thinking_enabled = self._thinking_enabled
-            payload = {
-                "model": self._model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "你是一个专业的日语翻译助手。请将用户输入的日语文本翻译成简体中文。只返回翻译结果，不要添加任何解释或额外内容。如果输入不是日语，请原样返回。"
-                    },
-                    {
-                        "role": "user",
-                        "content": f"请翻译以下文本：\n{text}"
-                    }
-                ],
-                "max_tokens": 1024 if thinking_enabled else 500
-            }
-            if thinking_enabled:
-                # DeepSeek 思考模式：开启思考并限制推理强度；该模式下不支持 temperature
-                payload["thinking"] = {"type": "enabled"}
-                payload["reasoning_effort"] = "high"
-            else:
-                payload["temperature"] = 0.3
+            translated = self._request_translation(text, timeout, thinking_enabled)
 
-            response = self._session.post(
-                url,
-                json=payload,
-                timeout=timeout
-            )
-            response.raise_for_status()
-
-            result = response.json()
-            translated = result["choices"][0]["message"]["content"].strip()
+            # 思考模式 content 为空（DeepSeek thinking 常见）→ 自动降级普通模式重试一次
+            if translated is None and thinking_enabled:
+                logger.warning("思考模式未产出译文，降级为普通模式重试")
+                translated = self._request_translation(text, timeout, thinking=False)
 
             if not translated:
                 logger.warning("翻译返回空结果")
@@ -169,6 +145,116 @@ class TranslatorService:
         except Exception:
             logger.exception("翻译异常")
             self._safe_callback(callback, None)
+
+    # ---------- 请求与结果提取 ----------
+    _SYSTEM_PROMPT = (
+        "你是一个专业的日语→简体中文翻译引擎。严格遵守以下规则：\n"
+        "1. 只输出译文本身，禁止输出任何解释、注释、前缀、后缀、引号或 Markdown 格式；\n"
+        "2. 禁止输出代码块（```）、JSON、列表编号等包装形式；\n"
+        "3. 译文必须完整覆盖源文本的全部内容，不得省略、概括或添加；\n"
+        "4. 即使源文本是片假名、拟声词、专有名词、作品标题，也要尽力直译或音译，不得拒绝翻译；\n"
+        "5. 如果输入本身不是日语，原样返回输入文本。"
+    )
+
+    def _request_translation(self, text: str, timeout: int, thinking: bool) -> Optional[str]:
+        """单次翻译请求：构造 payload → 发送 → 清洗提取译文。
+
+        返回清洗后的译文；content 为空时尝试从 reasoning_content 提取；
+        仍为空则返回 None（由调用方决定降级/失败）。
+        """
+        url = f"{self._base_url}/chat/completions"
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": self._SYSTEM_PROMPT},
+                {"role": "user", "content": f"直接输出下面文本的简体中文译文：\n{text}"}
+            ],
+            "max_tokens": 2048 if thinking else 800,
+        }
+        if thinking:
+            # DeepSeek 思考模式：开启思考并限制推理强度；该模式下不支持 temperature
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = "high"
+        else:
+            payload["temperature"] = 0.3
+
+        response = self._session.post(url, json=payload, timeout=timeout)
+        response.raise_for_status()
+        result = response.json()
+        msg = result["choices"][0]["message"]
+
+        # 1) 常规 content
+        raw = (msg.get("content") or "").strip()
+        translated = self._clean_output(raw)
+        if translated:
+            return translated
+
+        # 2) 思考模式下 content 可能为空 → 从 reasoning_content 提取译文
+        reasoning = (msg.get("reasoning_content") or "").strip()
+        translated = self._clean_output(self._extract_from_reasoning(reasoning))
+        if translated:
+            logger.debug("从 reasoning_content 提取到译文")
+            return translated
+        return None
+
+    def _extract_from_reasoning(self, reasoning: str) -> Optional[str]:
+        """从思考过程（reasoning_content）中提取最终译文。
+
+        优先找「译文/翻译结果/最终答案是」等标记行的冒号后内容；
+        无标记时取最后一行（思考结束通常紧跟最终答案）。
+        """
+        if not reasoning:
+            return None
+        lines = [ln.strip() for ln in reasoning.splitlines() if ln.strip()]
+        if not lines:
+            return None
+        for i, ln in enumerate(lines):
+            m = re.search(r'(?:译文|翻译结果|最终译文|最终答案|答案是|因此结果是)\s*[:：]?\s*(.*)$', ln)
+            if m:
+                tail = m.group(1).strip().strip('"\'“”')
+                if tail and not re.fullmatch(r'[\s\-—=~·.。、，,]+', tail):
+                    return tail
+                # 冒号后为空 → 取下一行
+                if i + 1 < len(lines):
+                    cand = lines[i + 1].strip().strip('"\'“”')
+                    if cand:
+                        return cand
+        return lines[-1].strip('"\'“”') or None
+
+    def _clean_output(self, raw: Optional[str]) -> Optional[str]:
+        """清洗模型输出：剥掉代码块 / JSON 包裹 / 成对引号 / 解释前缀。
+
+        返回干净译文；无法提取或模型拒绝翻译时返回 None。
+        """
+        if not raw:
+            return None
+        text = raw.strip()
+        if not text:
+            return None
+
+        # 1) Markdown 代码块（```...``` 或 ```lang\n...\n```）
+        m = re.search(r'```(?:[a-zA-Z0-9_+-]*)\s*\n?(.*?)```', text, re.S)
+        if m and m.group(1).strip():
+            text = m.group(1).strip()
+        # 2) JSON 包裹：{"translation": "..."} / {"result": "..."} 等
+        m = re.search(r'\{[^{}]*"(?:translation|result|text|translated|译文|翻译|内容)"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}', text, re.S)
+        if m and m.group(1).strip():
+            text = m.group(1).strip()
+        # 3) 成对包裹引号（ASCII 双引号/单引号、中文双引号“”）
+        if len(text) >= 2:
+            if (text[0] == text[-1] == '"') or (text[0] == text[-1] == "'"):
+                text = text[1:-1].strip()
+            elif text[0] == '\u201c' and text[-1] == '\u201d':
+                text = text[1:-1].strip()
+        # 4) 解释前缀：如「以下是翻译结果：」「翻译：」「译文：」
+        text = re.sub(r'^(?:以下是?|这是)?(?:其)?\s*(?:简体中文)?\s*(?:翻译|译文|中文翻译)\s*(?:结果|内容)?\s*[:：]\s*', '', text)
+        # 5) 模型拒绝/无法翻译 → 视为失败
+        if re.search(r'^(?:抱歉|对不起|不好意思|很抱歉)[，,]?\s*(?:我)?(?:无法|不能|无法进行|拒绝|没有权限|暂不)', text):
+            return None
+        # 6) 纯占位/无意义输出
+        if not text or re.fullmatch(r'[\s\-—=~·.。、，,]+', text):
+            return None
+        return text
 
     def invalidate(self, text: str):
         """清除指定文本的翻译缓存"""

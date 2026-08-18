@@ -374,9 +374,24 @@ class WorksListView(QListView):
         bar = self.verticalScrollBar()
         bar.setValue(bar.value() + int(step))
 
-    def set_works(self, works, scroll_to_top=False):
-        """替换列表数据。scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
-        局部刷新（详情刷新/隐藏/删除记录）传 False 保持当前滚动位置。"""
+    def set_works(self, works, scroll_to_top=False, preserve_scroll=False):
+        """替换列表数据。
+
+        scroll_to_top=True 时滚动条回到顶部（翻页/搜索/刷新场景）；
+        preserve_scroll=True 时按原相对位置（值/最大值）保持滚动条（局部刷新场景）；
+        都不传则保持 Qt reset 默认行为（依赖 Qt 内部保留）。
+
+        注意：set_works 入口之前可能发生过 viewport 变化（如底栏重建挤压），
+        导致 max 已被调过；preserve_scroll 由调用者在 set_works 之前主动存 ratio，
+        可彻底避开底栏 resize 时序问题。
+        """
+        restore_ratio = None
+        if preserve_scroll and not scroll_to_top:
+            bar = self.verticalScrollBar()
+            old_value = bar.value()
+            old_max = bar.maximum()
+            if old_max > 0 and old_value > 0:
+                restore_ratio = old_value / old_max
         self.model().set_works(works)
         # 裁剪缩略图缓存到当前列表，防止无界增长
         self.delegate().prune_thumbs(
@@ -384,6 +399,22 @@ class WorksListView(QListView):
         if scroll_to_top:
             # model reset 后 view 布局可能下一帧才稳定，延迟一帧保证滚动生效
             QTimer.singleShot(0, self.scrollToTop)
+        elif restore_ratio is not None:
+            # Qt model reset 后 view 布局需要 1-2 帧才稳定（特别是 card delegate
+            # 高度依赖 grid 布局），分多次延迟恢复覆盖整个稳定期，避免在
+            # 布局中途 setValue 算出错误像素导致的"位置跳变"。
+            for delay in (0, 30, 120):
+                QTimer.singleShot(delay, lambda r=restore_ratio: self._restore_scroll_by_ratio(r))
+
+    def _restore_scroll_by_ratio(self, ratio):
+        """按原占位比恢复滚动条位置。处理：Qt reset 后 max 可能变化，
+        但内容相对位置（值/最大值）不变 → 按相同 ratio 还原，确保视觉无跳变。
+        """
+        bar = self.verticalScrollBar()
+        new_max = bar.maximum()
+        if new_max > 0:
+            target = int(new_max * ratio)
+            bar.setValue(target)
 
     def _on_activated(self, index):
         work = self.model().work_at(index.row())
