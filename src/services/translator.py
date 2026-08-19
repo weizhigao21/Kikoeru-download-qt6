@@ -58,12 +58,24 @@ class TranslatorService:
         self._base_url = self._base_url.rstrip('/')
         self._model = model
         self._thinking_enabled = thinking_enabled
-        self._system_prompt = (system_prompt or "").strip()
+        new_sp = (system_prompt or "").strip()
+        if new_sp != self._system_prompt:
+            # 提示词变化 → 旧译文缓存作废（v2.2.3：避免改了提示词仍命中旧结果）
+            with self._lock:
+                self._cache.clear()
+            self._system_prompt = new_sp
         # 仅更新 Authorization，保留 session 其他配置（避免丢失 thinking 等自定义头）
         with self._lock:
             self._session.headers.update({
                 "Authorization": f"Bearer {api_key}"
             })
+
+    def _translate_cache_key(self, text: str):
+        """翻译缓存键 = (原文, 当前 system prompt)。
+
+        提示词变了缓存自然不命中，避免同一标题返回旧提示词的译文（v2.2.3）。
+        """
+        return (text, self._system_prompt)
 
     def translate(self, text: str, callback: Callable[[Optional[str]], None], timeout: Optional[int] = None):
         """
@@ -82,21 +94,22 @@ class TranslatorService:
             self._safe_callback(callback, None)
             return
 
-        # 缓存命中：直接回调缓存结果，不启动翻译线程
+        # 缓存命中：直接回调缓存结果，不启动翻译线程（缓存键含 system prompt，见 _translate_cache_key）
+        key = self._translate_cache_key(text)
         with self._lock:
-            if text in self._cache:
-                cached = self._cache[text]
+            if key in self._cache:
+                cached = self._cache[key]
                 if cached and cached.strip():
-                    self._cache.move_to_end(text)
+                    self._cache.move_to_end(key)
                     self._safe_callback(callback, cached)
                     return
                 else:
-                    del self._cache[text]
+                    del self._cache[key]
 
         # 缓存未命中：启动翻译线程
         threading.Thread(
             target=self._translate_thread,
-            args=(text, callback, timeout),
+            args=(text, callback, timeout, "translate", key),
             daemon=True
         ).start()
 
@@ -124,17 +137,21 @@ class TranslatorService:
 
         threading.Thread(
             target=self._translate_thread,
-            args=(text, callback, timeout, "explain"),
+            args=(text, callback, timeout, "explain", text),
             daemon=True
         ).start()
 
     def _translate_thread(self, text: str, callback: Callable[[Optional[str]], None], timeout: int = 30,
-                          mode: str = "translate"):
+                          mode: str = "translate", cache_key=None):
         """翻译/拆解线程，带超时保护 + 结果清洗 + 思考模式降级重试。
 
         Args:
             mode: "translate" 标题翻译 / "explain" 词义拆解（prompt、max_tokens、缓存按 mode 分流）
+            cache_key: 缓存键（翻译 = (原文, system_prompt)，拆解 = 原文）；
+                      由调用方在发起请求时快照，避免请求途中提示词变化写入错键
         """
+        if cache_key is None:
+            cache_key = text
         start_time = time.time()
         try:
             if not self._api_key:
@@ -158,8 +175,8 @@ class TranslatorService:
 
             cache = self._cache if mode == "translate" else self._explain_cache
             with self._lock:
-                cache[text] = translated
-                cache.move_to_end(text)
+                cache[cache_key] = translated
+                cache.move_to_end(cache_key)
                 while len(cache) > self._MAX_CACHE_SIZE:
                     cache.popitem(last=False)
 
@@ -326,9 +343,9 @@ class TranslatorService:
         return text
 
     def invalidate(self, text: str):
-        """清除指定文本的翻译缓存"""
+        """清除指定文本在当前提示词下的翻译缓存"""
         with self._lock:
-            self._cache.pop(text, None)
+            self._cache.pop(self._translate_cache_key(text), None)
 
     def clear_cache(self):
         """清除翻译与拆解缓存"""
@@ -337,11 +354,12 @@ class TranslatorService:
             self._explain_cache.clear()
 
     def get_cached(self, text: str) -> Optional[str]:
-        """获取缓存的翻译结果"""
+        """获取缓存的翻译结果（缓存键含当前 system prompt，提示词不同不会误命中）"""
+        key = self._translate_cache_key(text)
         with self._lock:
-            if text in self._cache:
-                self._cache.move_to_end(text)
-                return self._cache[text]
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
             return None
 
     def get_explained(self, text: str) -> Optional[str]:

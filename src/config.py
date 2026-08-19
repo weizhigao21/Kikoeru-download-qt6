@@ -73,7 +73,7 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.2.2"
+VERSION = "v2.2.3"
 
 # 翻译 system prompt 默认推荐文本（设置页首次打开时预填，用户可改/清空；清空 = 回退内置默认规则）
 AI_TRANSLATE_CONTEXT_DEFAULT = (
