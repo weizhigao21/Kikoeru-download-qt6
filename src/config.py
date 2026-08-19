@@ -29,6 +29,7 @@ _DEFAULT_CONFIG = {
     "ai_model": "gpt-3.5-turbo",
     "ai_thinking_enabled": True,
     "ai_translate_editable": True,
+    "ai_translate_context": "",   # 翻译上下文/风格提示（可自定义；空 = 不注入）
     "filename_filter_chars": "",
     "folder_title_max_len": 120,   # 下载目录名中标题的最大字符数（0 = 不限制，仅受 Windows 路径长度保护）
     "slow_speed_threshold": 1,
@@ -72,7 +73,15 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.2.0"
+VERSION = "v2.2.1"
+
+# 翻译上下文默认推荐文本（设置页首次打开时预填，用户可改/清空；空 = 不注入）
+AI_TRANSLATE_CONTEXT_DEFAULT = (
+    "这是 DLsite 音声作品标题（可能含成人向内容描述），标题常使用拟声拟态词、"
+    "自造词、片假名组合和口语拉长音。\n"
+    "翻译时请：1) 保留 ♡、～、☆ 等装饰符号；2) 语气贴近原标题（轻松/挑逗/俏皮等）；"
+    "3) 自造词尽量音译并体现其特色；4) 拉长音/网络用语用自然中文表达（如“赢不了啦～”）。"
+)
 
 # show_downloaded 模式常量
 SHOW_ALL = 1          # 显示全部作品
@@ -132,6 +141,7 @@ AI_API_BASE_URL = _cfg["ai_api_base_url"]
 AI_MODEL = _cfg["ai_model"]
 AI_THINKING_ENABLED = _cfg["ai_thinking_enabled"]
 AI_TRANSLATE_EDITABLE = _cfg["ai_translate_editable"]
+AI_TRANSLATE_CONTEXT = _cfg["ai_translate_context"]
 
 DOWNLOAD_METHOD = _cfg["download_method"]
 DIRECT_DOWNLOAD_THREADS = _cfg["direct_download_threads"]

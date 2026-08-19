@@ -24,6 +24,7 @@ class TranslatorService:
         self._base_url = ""
         self._model = ""
         self._thinking_enabled = True
+        self._context = ""  # 翻译上下文/风格提示（用户可自定义，注入翻译 system prompt）
         self._session = requests.Session()
         self._session.headers.update({
             "Content-Type": "application/json"
@@ -40,8 +41,14 @@ class TranslatorService:
         except Exception:
             logger.exception("翻译回调异常")
 
-    def update_config(self, api_key: str, base_url: str, model: str, thinking_enabled: bool = True):
-        """更新 API 配置"""
+    def update_config(self, api_key: str, base_url: str, model: str, thinking_enabled: bool = True,
+                      context: str = ""):
+        """更新 API 配置
+
+        Args:
+            context: 翻译上下文/风格提示（用户自定义，注入翻译 system prompt；
+                     空字符串 = 不注入，拆解请求不受影响）
+        """
         self._api_key = api_key
         self._base_url = base_url.rstrip('/')
         for suffix in ('/chat/completions', '/chat/completions/'):
@@ -51,6 +58,7 @@ class TranslatorService:
         self._base_url = self._base_url.rstrip('/')
         self._model = model
         self._thinking_enabled = thinking_enabled
+        self._context = (context or "").strip()
         # 仅更新 Authorization，保留 session 其他配置（避免丢失 thinking 等自定义头）
         with self._lock:
             self._session.headers.update({
@@ -220,6 +228,9 @@ class TranslatorService:
             max_tokens = 4096 if thinking else 2048
         else:
             system_prompt = self._SYSTEM_PROMPT
+            # 翻译上下文/风格提示（v2.2.1）：用户自定义，追加到 system prompt 尾部
+            if self._context:
+                system_prompt = system_prompt + "\n\n" + self._context
             user_content = f"直接输出下面文本的简体中文译文：\n{text}"
             max_tokens = 2048 if thinking else 800
         payload = {

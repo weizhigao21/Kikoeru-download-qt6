@@ -1009,7 +1009,8 @@ class MainWindow(QMainWindow):
                 _config.AI_API_KEY,
                 _config.AI_API_BASE_URL,
                 _config.AI_MODEL,
-                _config.AI_THINKING_ENABLED
+                _config.AI_THINKING_ENABLED,
+                _config.AI_TRANSLATE_CONTEXT
             )
         except Exception as e:
             logger.exception("初始化翻译服务失败: %s", e)

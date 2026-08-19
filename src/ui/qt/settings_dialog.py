@@ -12,8 +12,8 @@ import shutil
 
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QFileDialog,
                              QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                             QMessageBox, QPushButton, QRadioButton, QScrollArea,
-                             QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
+                             QMessageBox, QPlainTextEdit, QPushButton, QRadioButton,
+                             QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from src import config as _config
 from src.services.translator import get_translator
@@ -59,6 +59,7 @@ class SettingsDialog(QDialog):
             "ai_model": get("ai_model", "gpt-3.5-turbo"),
             "ai_thinking_enabled": get("ai_thinking_enabled", True),
             "ai_translate_editable": get("ai_translate_editable", True),
+            "ai_context": get("ai_translate_context", _config.AI_TRANSLATE_CONTEXT_DEFAULT),
             "filename_filter_chars": get("filename_filter_chars", ""),
             "folder_title_max_len": get("folder_title_max_len", 120),
             "subtitle_convert_enabled": get("subtitle_convert_enabled", True),
@@ -440,6 +441,13 @@ class SettingsDialog(QDialog):
         self.ai_editable_check = QCheckBox("启用翻译编辑（允许手动修改翻译结果）")
         self.ai_editable_check.setChecked(bool(v["ai_translate_editable"]))
         page_lay.addWidget(self.ai_editable_check)
+
+        page_lay.addWidget(QLabel("翻译上下文 / 风格提示（自定义后注入翻译请求，可显著提升效果）:"))
+        self.ai_context_edit = QPlainTextEdit(v["ai_context"])
+        self.ai_context_edit.setPlaceholderText("留空 = 不注入自定义上下文")
+        self.ai_context_edit.setFixedHeight(90)
+        self.ai_context_edit.setFont(SMALL)
+        page_lay.addWidget(self.ai_context_edit)
         page_lay.addStretch(1)
 
         scroll.setWidget(page)
@@ -521,6 +529,7 @@ class SettingsDialog(QDialog):
         new_ai_model = self.ai_model_edit.text().strip()
         new_ai_thinking = self.ai_thinking_check.isChecked()
         new_ai_editable = self.ai_editable_check.isChecked()
+        new_ai_context = self.ai_context_edit.toPlainText().strip()
         new_filename_filter = self.filter_edit.text().strip()
         new_title_max_len = self.title_len_spin.value()
         new_subtitle_convert = self.subtitle_convert_check.isChecked()
@@ -551,6 +560,7 @@ class SettingsDialog(QDialog):
                 "ai_model": new_ai_model,
                 "ai_thinking_enabled": new_ai_thinking,
                 "ai_translate_editable": new_ai_editable,
+                "ai_translate_context": new_ai_context,
                 "filename_filter_chars": new_filename_filter,
                 "folder_title_max_len": new_title_max_len,
                 "subtitle_convert_enabled": new_subtitle_convert,
@@ -584,6 +594,7 @@ class SettingsDialog(QDialog):
         _config.AI_MODEL = new_ai_model
         _config.AI_THINKING_ENABLED = new_ai_thinking
         _config.AI_TRANSLATE_EDITABLE = new_ai_editable
+        _config.AI_TRANSLATE_CONTEXT = new_ai_context
         _config.FILENAME_FILTER_CHARS = new_filename_filter
         _config.FOLDER_TITLE_MAX_LEN = new_title_max_len
         _config.SUBTITLE_CONVERT_ENABLED = new_subtitle_convert
@@ -610,7 +621,8 @@ class SettingsDialog(QDialog):
 
         translator = get_translator()
         if new_ai_enabled and new_ai_key:
-            translator.update_config(new_ai_key, new_ai_base, new_ai_model, new_ai_thinking)
+            translator.update_config(new_ai_key, new_ai_base, new_ai_model, new_ai_thinking,
+                                     new_ai_context)
 
         # 数据库目录变更 → 迁移 works.db / download_history.db
         if new_db_dir != old_db_dir:
