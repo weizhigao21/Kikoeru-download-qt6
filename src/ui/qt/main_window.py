@@ -10,8 +10,8 @@ import logging
 
 from PyQt6.QtCore import QThread, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QImage, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QInputDialog, QMainWindow, QMessageBox, QWidget,
-                             QVBoxLayout, QHBoxLayout)
+from PyQt6.QtWidgets import (QDialog, QInputDialog, QMainWindow, QMessageBox,
+                             QPlainTextEdit, QWidget, QVBoxLayout, QHBoxLayout)
 
 from src import (VERSION, DB_PATH, CACHE_DIR, DOWNLOAD_HISTORY_DB_PATH,
                  ICON_PATH, MEMORY_CACHE_SIZE)
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
     # 下载任务变化通知（observer 由轮询线程触发 → 信号 queued 回主线程）
     _downloads_changed = pyqtSignal()
     _translate_result = pyqtSignal(str, object, str)  # (原文标题, work, 翻译结果/None)
+    _explain_result = pyqtSignal(str, object, object)  # (原文标题, work, 拆解结果/None) v2.2.0
 
     def __init__(self):
         super().__init__()
@@ -188,6 +189,7 @@ class MainWindow(QMainWindow):
         self.detail_panel.tagClicked.connect(self.search_by_tag)
         self.detail_panel.hideRequested.connect(self._on_hide_requested)
         self.detail_panel.refreshRequested.connect(self._on_refresh_requested)
+        self.detail_panel.explainRequested.connect(self._on_explain_requested)
         self.detail_panel.deleteRecordRequested.connect(self._on_delete_record_requested)
 
     # ---------- 快捷键 ----------
@@ -1110,6 +1112,73 @@ class MainWindow(QMainWindow):
             self._set_status("✓ 翻译完成")
         else:
             self._set_status("翻译失败，请检查 API 设置或网络连接")
+
+    # ---------- 词义拆解（v2.2.0） ----------
+    def _on_explain_requested(self, work):
+        """详情面板「拆解」按钮：内存缓存 → DB 缓存 → 异步请求。"""
+        if work is None:
+            return
+        original = work.get("_original_title") or work.get("title") or ""
+        if not original.strip():
+            return
+        if not _config.AI_TRANSLATE_ENABLED or not _config.AI_API_KEY:
+            self._set_status("未启用 AI 翻译，请先在「设置 → AI 翻译」中配置")
+            return
+        translator = get_translator()
+        cached = translator.get_explained(original)
+        if cached:
+            self._show_explanation_dialog(work, cached)
+            return
+        work_id = str(work.get("id", ""))
+        if work_id:
+            try:
+                cached = self.db.get_title_explanation(work_id)
+            except Exception:
+                logger.exception("读取词义拆解失败: %s", original[:30])
+                cached = ""
+            if cached:
+                self._show_explanation_dialog(work, cached)
+                return
+        self._set_status("正在生成词义拆解...")
+
+        def on_result(result):
+            self._explain_result.emit(original, work, result)
+
+        try:
+            translator.explain(original, on_result)
+        except Exception as e:
+            logger.exception("词义拆解请求异常: %s", e)
+            self._set_status(f"词义拆解请求失败：{e}")
+
+    def _on_explain_result(self, original, work, result):
+        if not result:
+            self._set_status("词义拆解失败，请稍后重试")
+            return
+        work_id = str(work.get("id", ""))
+        if work_id:
+            try:
+                self.db.save_title_explanation(work_id, result)
+            except Exception:
+                logger.exception("保存词义拆解失败: %s", original[:30])
+        self._set_status("✓ 词义拆解完成")
+        self._show_explanation_dialog(work, result)
+
+    def _show_explanation_dialog(self, work, text):
+        """弹窗展示词义拆解（只读、可选中复制）。"""
+        original = work.get("_original_title") or work.get("title") or ""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("词义拆解")
+        dlg.setMinimumSize(520, 400)
+        lay = QVBoxLayout(dlg)
+        title_lbl = QLabel(original)
+        title_lbl.setWordWrap(True)
+        title_lbl.setObjectName("sectionLabel")
+        lay.addWidget(title_lbl)
+        editor = QPlainTextEdit(text)
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        lay.addWidget(editor, 1)
+        dlg.exec()
 
     def _apply_translation(self, work, translated):
         """应用翻译：更新列表卡片标题、落库（translations 表）、刷新详情面板。"""

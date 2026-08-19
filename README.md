@@ -6,7 +6,7 @@
 
 ## 版本
 
-**v2.1.2**（当前版本，Qt6 UI）
+**v2.2.0**（当前版本，Qt6 UI）
 
 ## 功能特性
 
@@ -38,6 +38,7 @@
 - **详情页翻译**：详情页自动显示翻译标题，支持"原/译"切换
 - **API 可配置**：设置窗口支持配置 API Key、API 地址、模型名称、思考模式开关
 - **翻译结果健壮性**（v2.1.2）：强化提示词（禁止解释/代码块/JSON/引号，不得拒绝翻译）；自动清洗模型输出（剥 Markdown 代码块、JSON 包裹、成对引号、「以下是翻译结果：」等前缀）；思考模式下 `content` 为空时自动从 `reasoning_content` 提取译文，仍为空则自动降级为普通模式重试一次
+- **词义拆解**（v2.2.0）：详情面板标题行新增「拆解」按钮，对日文原题生成逐词拆解（自造词/拟声拟态词/专有名词/古语/口语拉长音，自造词拆词源）+ 末尾「整体理解」，弹窗展示可复制；独立入口与纯译文链路分离，缓存与数据库持久化（translations 表 `title_explanation` 列），删除翻译时同步删除
 
 ### 作品展示
 - **详细信息展示**：点击作品可查看标题、标签、封面、声优、厂商等详细信息
@@ -130,7 +131,7 @@
 - `src/ui/qt/qt_fonts.py` / `styles.py` — Qt 字体适配层（复用 `src/ui/fonts.py` 常量）与 QSS 样式
 - `legacy_tk/` — v2.0.0 归档的 tkinter 版 UI（gui_app*.py 与 src/ui 下 10 个模块）
 - `src/download/manager.py` / `src/download/manager_core.py` / `src/download/manager_poll.py` / `src/download/models.py` — 全局下载管理器（单例、提交/持久化/队列、轮询进度/重试/低速检测、数据模型）
-- `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、线程安全单例、翻译缓存、思考模式、`_safe_callback` 异常保护）
+- `src/services/translator.py` — AI 翻译服务（OpenAI 兼容 API、线程安全单例、翻译/拆解双缓存、思考模式、词义拆解 explain、`_safe_callback` 异常保护）
 
 ```
 g:\code\音声下载\
@@ -158,7 +159,7 @@ g:\code\音声下载\
 │   │   └── manager_poll.py     # DownloadPollMixin（轮询进度、重试、低速自重启）
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── translator.py          # AI 翻译服务（线程安全单例、翻译缓存、思考模式、`_safe_callback`）
+│   │   ├── translator.py          # AI 翻译服务（线程安全单例、翻译/拆解双缓存、思考模式、词义拆解 explain）
 │   │   ├── subtitle_converter.py  # VTT→LRC 字幕转换（时间戳进位、NOTE 块空行结束、多编码）
 │   │   └── text_converter.py      # 繁简转换（UTF-8/Shift-JIS 回退、文件名+内容转换）
 │   └── ui/

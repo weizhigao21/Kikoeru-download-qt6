@@ -44,6 +44,11 @@ class DatabaseManager(BaseDatabaseManager):
                     translated_title TEXT
                 )
             """)
+            # 旧库缺列迁移：词义拆解（v2.2.0）
+            cursor.execute("PRAGMA table_info(translations)")
+            t_columns = [row[1] for row in cursor.fetchall()]
+            if "title_explanation" not in t_columns:
+                cursor.execute("ALTER TABLE translations ADD COLUMN title_explanation TEXT")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS collector_state (
                     key TEXT PRIMARY KEY,
@@ -290,10 +295,38 @@ class DatabaseManager(BaseDatabaseManager):
         return {r[0]: r[1] for r in rows if r[0] and r[1]}
 
     def save_translated_title(self, work_id: str, translated_title: str):
+        """保存翻译标题。
+
+        UPSERT（ON CONFLICT DO UPDATE）而非 INSERT OR REPLACE：
+        REPLACE 会删旧行插新行，未指定的 title_explanation 列会被重置为 NULL，
+        导致先拆解、后编辑译文时拆解结果静默丢失（v2.2.0 两列共存后必须）。
+        """
         with self._connect() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT OR REPLACE INTO translations (work_id, translated_title) VALUES (?, ?)",
-                           (work_id, translated_title))
+            cursor.execute(
+                "INSERT INTO translations (work_id, translated_title) VALUES (?, ?) "
+                "ON CONFLICT(work_id) DO UPDATE SET translated_title = excluded.translated_title",
+                (work_id, translated_title))
+            conn.commit()
+
+    def get_title_explanation(self, work_id: str) -> str:
+        """查询词义拆解（v2.2.0，translations 表 title_explanation 列）。"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT title_explanation FROM translations WHERE work_id = ? LIMIT 1", (work_id,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                return row[0]
+            return ""
+
+    def save_title_explanation(self, work_id: str, explanation: str):
+        """保存词义拆解（UPSERT，只更新 explanation 列，保留 translated_title）。"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO translations (work_id, title_explanation) VALUES (?, ?) "
+                "ON CONFLICT(work_id) DO UPDATE SET title_explanation = excluded.title_explanation",
+                (work_id, explanation))
             conn.commit()
 
     def delete_translated_title(self, work_id: str):

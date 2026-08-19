@@ -17,6 +17,7 @@ class TranslatorService:
 
     def __init__(self):
         self._cache: OrderedDict = OrderedDict()
+        self._explain_cache: OrderedDict = OrderedDict()
         self._lock = threading.Lock()
         # 初始化配置属性，避免 update_config 未调用时 _translate_thread 访问 _base_url 抛 AttributeError
         self._api_key = ""
@@ -91,8 +92,41 @@ class TranslatorService:
             daemon=True
         ).start()
 
-    def _translate_thread(self, text: str, callback: Callable[[Optional[str]], None], timeout: int = 30):
-        """翻译线程，带超时保护 + 结果清洗 + 思考模式降级重试。"""
+    def explain(self, text: str, callback: Callable[[Optional[str]], None], timeout: Optional[int] = None):
+        """异步生成词义拆解（逐词解释 + 整体理解）。
+
+        与 translate() 同模式：空文本直接回调 None；缓存命中直接回调；
+        未命中启动后台线程（prompt / max_tokens / 缓存按 explain 分流）。
+        """
+        if timeout is None:
+            timeout = 90 if getattr(self, '_thinking_enabled', True) else 30
+        if not text or not text.strip():
+            self._safe_callback(callback, None)
+            return
+
+        with self._lock:
+            if text in self._explain_cache:
+                cached = self._explain_cache[text]
+                if cached and cached.strip():
+                    self._explain_cache.move_to_end(text)
+                    self._safe_callback(callback, cached)
+                    return
+                else:
+                    del self._explain_cache[text]
+
+        threading.Thread(
+            target=self._translate_thread,
+            args=(text, callback, timeout, "explain"),
+            daemon=True
+        ).start()
+
+    def _translate_thread(self, text: str, callback: Callable[[Optional[str]], None], timeout: int = 30,
+                          mode: str = "translate"):
+        """翻译/拆解线程，带超时保护 + 结果清洗 + 思考模式降级重试。
+
+        Args:
+            mode: "translate" 标题翻译 / "explain" 词义拆解（prompt、max_tokens、缓存按 mode 分流）
+        """
         start_time = time.time()
         try:
             if not self._api_key:
@@ -101,26 +135,29 @@ class TranslatorService:
                 return
 
             thinking_enabled = self._thinking_enabled
-            translated = self._request_translation(text, timeout, thinking_enabled)
+            translated = self._request_translation(text, timeout, thinking_enabled, mode)
 
             # 思考模式 content 为空（DeepSeek thinking 常见）→ 自动降级普通模式重试一次
             if translated is None and thinking_enabled:
-                logger.warning("思考模式未产出译文，降级为普通模式重试")
-                translated = self._request_translation(text, timeout, thinking=False)
+                logger.warning("思考模式未产出%s，降级为普通模式重试",
+                               "译文" if mode == "translate" else "拆解")
+                translated = self._request_translation(text, timeout, thinking=False, mode=mode)
 
             if not translated:
-                logger.warning("翻译返回空结果")
+                logger.warning("%s返回空结果", "翻译" if mode == "translate" else "拆解")
                 self._safe_callback(callback, None)
                 return
 
+            cache = self._cache if mode == "translate" else self._explain_cache
             with self._lock:
-                self._cache[text] = translated
-                self._cache.move_to_end(text)
-                while len(self._cache) > self._MAX_CACHE_SIZE:
-                    self._cache.popitem(last=False)
+                cache[text] = translated
+                cache.move_to_end(text)
+                while len(cache) > self._MAX_CACHE_SIZE:
+                    cache.popitem(last=False)
 
             elapsed = time.time() - start_time
-            logger.debug("翻译完成，耗时 %.2f 秒: %s...", elapsed, text[:30])
+            logger.debug("%s完成，耗时 %.2f 秒: %s...",
+                         "翻译" if mode == "translate" else "拆解", elapsed, text[:30])
             self._safe_callback(callback, translated)
 
         except requests.exceptions.Timeout:
@@ -156,20 +193,42 @@ class TranslatorService:
         "5. 如果输入本身不是日语，原样返回输入文本。"
     )
 
-    def _request_translation(self, text: str, timeout: int, thinking: bool) -> Optional[str]:
-        """单次翻译请求：构造 payload → 发送 → 清洗提取译文。
+    _EXPLAIN_SYSTEM_PROMPT = (
+        "你是一个专业的日语→简体中文标题解说引擎。对给定的日文作品标题做逐词拆解。\n"
+        "严格遵守以下规则：\n"
+        "1. 只拆解有解释价值的词/短语：自造词、拟声拟态词、专有名词、古语或戏剧化写法、"
+        "口语缩略/拉长音、俚语；跳过普通助词（は/が/の/に 等）和显而易见的常用词；\n"
+        "2. 每行一条，格式「词：解释」，解释用简体中文，单条不超过 30 字；"
+        "自造词需拆词源（如 ムチプリーナ = ムチ+プリ+ーナ）；\n"
+        "3. 输出 8-12 条，宁缺毋滥；\n"
+        "4. 最后一行以「整体理解：」开头，用 1-2 句概括标题含义与语气氛围；\n"
+        "5. 禁止输出其他任何内容、前缀、Markdown 或代码块；\n"
+        "6. 输入不是日语时，仅输出「整体理解：」加一句话说明。"
+    )
 
-        返回清洗后的译文；content 为空时尝试从 reasoning_content 提取；
+    def _request_translation(self, text: str, timeout: int, thinking: bool, mode: str = "translate") -> Optional[str]:
+        """单次请求：构造 payload → 发送 → 清洗提取结果。
+
+        翻译/拆解共用（按 mode 分流 prompt、user 消息、max_tokens）。
+        返回清洗后的结果；content 为空时尝试从 reasoning_content 提取；
         仍为空则返回 None（由调用方决定降级/失败）。
         """
         url = f"{self._base_url}/chat/completions"
+        if mode == "explain":
+            system_prompt = self._EXPLAIN_SYSTEM_PROMPT
+            user_content = f"对下面文本做逐词拆解：\n{text}"
+            max_tokens = 4096 if thinking else 2048
+        else:
+            system_prompt = self._SYSTEM_PROMPT
+            user_content = f"直接输出下面文本的简体中文译文：\n{text}"
+            max_tokens = 2048 if thinking else 800
         payload = {
             "model": self._model,
             "messages": [
-                {"role": "system", "content": self._SYSTEM_PROMPT},
-                {"role": "user", "content": f"直接输出下面文本的简体中文译文：\n{text}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
             ],
-            "max_tokens": 2048 if thinking else 800,
+            "max_tokens": max_tokens,
         }
         if thinking:
             # DeepSeek 思考模式：开启思考并限制推理强度；该模式下不支持 temperature
@@ -262,9 +321,10 @@ class TranslatorService:
             self._cache.pop(text, None)
 
     def clear_cache(self):
-        """清除翻译缓存"""
+        """清除翻译与拆解缓存"""
         with self._lock:
             self._cache.clear()
+            self._explain_cache.clear()
 
     def get_cached(self, text: str) -> Optional[str]:
         """获取缓存的翻译结果"""
@@ -272,6 +332,14 @@ class TranslatorService:
             if text in self._cache:
                 self._cache.move_to_end(text)
                 return self._cache[text]
+            return None
+
+    def get_explained(self, text: str) -> Optional[str]:
+        """获取缓存的词义拆解结果（不触发请求）"""
+        with self._lock:
+            if text in self._explain_cache:
+                self._explain_cache.move_to_end(text)
+                return self._explain_cache[text]
             return None
 
 

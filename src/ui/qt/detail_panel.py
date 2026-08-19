@@ -114,6 +114,7 @@ class DetailPanel(QScrollArea):
     hideRequested = pyqtSignal(object)
     refreshRequested = pyqtSignal(object)
     deleteRecordRequested = pyqtSignal(object)
+    explainRequested = pyqtSignal(object)  # 词义拆解（v2.2.0）
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -164,6 +165,12 @@ class DetailPanel(QScrollArea):
         self.copy_title_btn.setFont(EMOJI)
         self.copy_title_btn.clicked.connect(self._copy_title)
         tr.addWidget(self.copy_title_btn)
+        self.explain_btn = QPushButton("拆解")
+        self.explain_btn.setFlat(True)
+        self.explain_btn.setToolTip("词义拆解：逐词解释标题中的自造词/拟声词/专有名词等")
+        self.explain_btn.clicked.connect(lambda: self.explainRequested.emit(self._work))
+        self.explain_btn.hide()
+        tr.addWidget(self.explain_btn)
         lay.addWidget(title_row)
 
         # 封面
@@ -264,6 +271,7 @@ class DetailPanel(QScrollArea):
         self._original_title = title
         self._translated_title = ""
         self._show_translated = False
+        self.explain_btn.setVisible(bool(title.strip()))
 
         work_id = str(work.get("id", ""))
         cached = translated
@@ -308,6 +316,7 @@ class DetailPanel(QScrollArea):
     def _reset_empty(self):
         self.title_label.setText("未选择作品")
         self.toggle_btn.hide()
+        self.explain_btn.hide()
         self.cover_label.setFixedSize(360, 200)
         self.cover_label.setPixmap(QPixmap())
         self.cover_label.setText("未选择作品")

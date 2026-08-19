@@ -1,3 +1,9 @@
+## v2.2.0
+
+- **新增：词义拆解** — 详情面板标题行新增「拆解」按钮，对日文原题生成逐词拆解（8-12 条「词：解释」，覆盖自造词/拟声拟态词/专有名词/古语/口语拉长音，自造词拆词源）+ 末尾「整体理解」概括；弹窗只读展示可复制；独立入口不影响纯译文翻译链路，批量翻译不被拖慢
+- **翻译服务扩展** — `TranslatorService` 新增 `explain()` / `get_explained()`（独立拆解 prompt、max_tokens 思考 4096 / 普通 2048、独立 LRU 缓存，思考模式降级重试复用）
+- **数据层** — `translations` 表新增 `title_explanation` 列（自动迁移）；`save_translated_title` 由 `INSERT OR REPLACE` 改为 UPSERT（`ON CONFLICT DO UPDATE`），修复先拆解、后编辑译文时拆解结果被 REPLACE 整行覆盖静默丢失的隐患；新增 `get/save_title_explanation`；删除翻译记录时拆解随整行一并删除
+
 ## v2.1.2
 
 - **优化：翻译结果健壮性** — 强化翻译提示词（只输出译文、禁止解释/代码块/JSON/引号、不得拒绝翻译、非日语原样返回）；新增结果清洗（剥 Markdown 代码块 / JSON 包裹 / 成对引号 / 「以下是翻译结果：」等前缀，拒绝翻译与纯占位输出判失败）；思考模式下 `content` 为空时自动从 `reasoning_content` 提取译文，仍为空自动降级为普通模式重试一次；max_tokens 提高（思考 2048 / 普通 800）防思考消耗截断译文
