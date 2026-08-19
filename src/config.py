@@ -73,10 +73,11 @@ def _resolve_first(*candidates):
             return path
     return candidates[0]
 
-VERSION = "v2.2.1"
+VERSION = "v2.2.2"
 
-# 翻译上下文默认推荐文本（设置页首次打开时预填，用户可改/清空；空 = 不注入）
+# 翻译 system prompt 默认推荐文本（设置页首次打开时预填，用户可改/清空；清空 = 回退内置默认规则）
 AI_TRANSLATE_CONTEXT_DEFAULT = (
+    "你是一个专业的日语→简体中文翻译引擎。只输出译文本身，禁止输出任何解释、注释、前缀、后缀、引号或 Markdown。\n"
     "这是 DLsite 音声作品标题（可能含成人向内容描述），标题常使用拟声拟态词、"
     "自造词、片假名组合和口语拉长音。\n"
     "翻译时请：1) 保留 ♡、～、☆ 等装饰符号；2) 语气贴近原标题（轻松/挑逗/俏皮等）；"

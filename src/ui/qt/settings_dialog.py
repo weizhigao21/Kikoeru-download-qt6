@@ -442,9 +442,9 @@ class SettingsDialog(QDialog):
         self.ai_editable_check.setChecked(bool(v["ai_translate_editable"]))
         page_lay.addWidget(self.ai_editable_check)
 
-        page_lay.addWidget(QLabel("翻译上下文 / 风格提示（自定义后注入翻译请求，可显著提升效果）:"))
+        page_lay.addWidget(QLabel("翻译提示词（System Prompt，完全自定义，可显著提升效果）:"))
         self.ai_context_edit = QPlainTextEdit(v["ai_context"])
-        self.ai_context_edit.setPlaceholderText("留空 = 不注入自定义上下文")
+        self.ai_context_edit.setPlaceholderText("留空 = 使用内置默认规则")
         self.ai_context_edit.setFixedHeight(90)
         self.ai_context_edit.setFont(SMALL)
         page_lay.addWidget(self.ai_context_edit)
